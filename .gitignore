@@ -1,0 +1,50 @@
+# --- Secrets and local configuration -----------------------------------------
+# Real credentials (database URLs, model API keys) live only in local env files.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Python ------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Local databases ---------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.dump
+pgdata/
+postgres-data/
+
+# --- Generated files that may contain sensitive inputs -----------------------
+# Raw prompts, model responses, request logs, and ad-hoc data exports can carry
+# case content or credentials. Keep them in these locations; publish only
+# reviewed, sanitized evidence under docs/.
+logs/
+*.log
+.local/
+tmp/
+model-io/
+*.prompt.jsonl
+*.response.jsonl
+
+# --- Editor and OS files -----------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

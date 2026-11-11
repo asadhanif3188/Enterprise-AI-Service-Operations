@@ -58,6 +58,7 @@ This checklist describes **project progress**, not the complete feature plan. It
 ## Documentation
 
 - [Requirements](docs/requirements.md) — business problem, expected behavior, invariants, and acceptance checks.
+- [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
 
