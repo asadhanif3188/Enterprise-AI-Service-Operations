@@ -23,7 +23,7 @@ The AI component does not approve changes, assign permissions, update case statu
 
 ## DEC-003 — Only authorized application operations can change case state
 
-A model's recommendation does not determine whether a case is open, under review, resolved, or closed. Case state changes only when application rules permit the transition and the required authorization has been checked. Where human approval is required, the application must verify that the approval still applies to the exact proposed change.
+A model's recommendation does not determine whether a case is new, in review, resolved, or closed. Case state changes only when application rules permit the transition and the required authorization has been checked. Where human approval is required, the application must verify that the approval still applies to the exact proposed change.
 
 An AI suggestion may inform a person's decision, but accepting a suggestion and executing a state change are separate steps.
 

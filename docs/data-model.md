@@ -1,73 +1,26 @@
-# Data Model
+# Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Proposed — to be reviewed before the first migration
+**Status:** Draft v0.1 — design baseline; not yet implemented
 
 ## 1. Purpose and scope
 
-This document describes the initial relational model for the service-case workflow. It covers three entities: the customer organization, the service case it owns, and the AI suggestions generated for that case.
+This document defines the first relational model for service cases and AI-assisted triage. It follows the business requirements in [`requirements.md`](requirements.md) and the ownership decisions in [`architecture-context.md`](architecture-context.md).
 
-It supports the Week 1 requirements: storing a case under an owning organization, rejecting invalid records, generating an AI suggestion, and keeping the case's status independent of that suggestion (see [requirements](requirements.md) and [architecture context](architecture-context.md), DEC-001 to DEC-003).
+The starting model has three entities:
 
-Users, assignment, review decisions, case history, and knowledge sources are deliberately out of scope for this first version. This is a design proposal, not a description of an implemented schema.
+- `organization` — a customer organization whose cases must be kept separate from other customers' cases.
+- `case_record` — the authoritative record of a service case, including its current status.
+- `ai_suggestion` — a proposed assessment generated for a particular version of a case.
 
-## 2. Entities and attributes
+PostgreSQL is the proposed system of record. This document covers the logical structure and intended database constraints. The first migration and its negative tests will be implemented separately.
 
-### `organization`
-
-A customer organization served by the provider.
-
-| Attribute | Type | Purpose |
-|---|---|---|
-| `id` | `uuid` | Unique organization identifier; primary key. |
-| `name` | `text` | Human-readable organization name. |
-| `slug` | `text` | Unique short identifier. |
-| `created_at` | `timestamptz` | Creation timestamp. |
-
-### `case_record`
-
-A service case. This table holds the authoritative case state.
-
-| Attribute | Type | Purpose |
-|---|---|---|
-| `id` | `uuid` | Unique case identifier; primary key. |
-| `organization_id` | `uuid` | Owning customer organization; required foreign key. |
-| `title` | `text` | Short case description. |
-| `description` | `text` | Detailed problem statement. |
-| `status` | `text` | Authoritative lifecycle state. |
-| `version` | `bigint` | Revision number, used to detect stale changes. |
-| `created_at` | `timestamptz` | Creation timestamp. |
-| `updated_at` | `timestamptz` | Last modification timestamp. |
-
-Initial status values are `NEW`, `IN_REVIEW`, and `CLOSED`. These are starting values, not a final workflow policy; permitted transitions need their own rules.
-
-`organization_id` identifies the **owning customer organization**. It does not identify an assigned service engineer. A case can exist before anyone is assigned, and no `assigned_engineer_id` is added until a user model and assignment rules are defined.
-
-### `ai_suggestion`
-
-A structured triage suggestion produced by a model for one revision of a case.
-
-| Attribute | Type | Purpose |
-|---|---|---|
-| `id` | `uuid` | Unique suggestion identifier; primary key. |
-| `case_id` | `uuid` | Case the suggestion was generated for; required foreign key. |
-| `case_version` | `bigint` | Case revision used to generate the suggestion. |
-| `proposed_category` | `text` | AI-suggested category. |
-| `proposed_urgency` | `text` | AI-suggested urgency. |
-| `reasoning` | `text` | Explanation returned by the model. |
-| `suggested_next_step` | `text` | Proposed action or investigation. |
-| `model_id` | `text` | Model that produced the suggestion. |
-| `prompt_version` | `text` | Version of the prompt definition. |
-| `created_at` | `timestamptz` | Suggestion creation timestamp. |
-
-During Week 1, the raw model invocation evidence is stored separately under `evaluations/`. A dedicated model-execution record may be introduced later.
-
-## 3. Relationships
+## 2. Entity relationships
 
 ```mermaid
 erDiagram
     organization ||--o{ case_record : owns
-    case_record ||--o{ ai_suggestion : receives
+    case_record ||--o{ ai_suggestion : has
 
     organization {
         uuid id PK
@@ -101,62 +54,114 @@ erDiagram
     }
 ```
 
-**One organization owns many cases.** An organization may have hundreds of cases, so the reference is stored on the "many" side: `case_record.organization_id`. The organization does not hold a list of case IDs. Every case has exactly one owning organization.
+An organization can have zero or many cases; each case belongs to exactly one organization. A case can have zero or many AI suggestions; each suggestion refers to exactly one case. We keep multiple suggestions because a case may be evaluated again after its contents change.
 
-**One case receives many AI suggestions.** A case may be analyzed more than once, for example when first opened and again after new information is added. `ai_suggestion.case_id` is therefore not unique. Every suggestion belongs to exactly one case.
+## 3. Entities and attributes
 
-**A suggestion belongs to a specific case revision.** If a suggestion was generated from case version 3 and an engineer later updates the case to version 4, the older suggestion may be stale. Recording `case_version` lets the application detect this when deciding whether an approval or action still applies. The column alone does not provide concurrency safety; application operations and database transactions will enforce that later.
+### `organization`
 
-## 4. Integrity rules
+| Attribute | Proposed type | Rule or purpose |
+|---|---|---|
+| `id` | `uuid` | Primary key; generated by the application or database. |
+| `name` | `text` | Required, non-blank display name. |
+| `slug` | `text` | Required, unique organization identifier suitable for stable references. |
+| `created_at` | `timestamptz` | Required creation timestamp. |
 
-These rules belong to the model, not just the diagram. Where a rule is enforced by the database, an invalid write is rejected rather than corrected.
+### `case_record`
 
-**Ownership and references**
+| Attribute | Proposed type | Rule or purpose |
+|---|---|---|
+| `id` | `uuid` | Primary key. |
+| `organization_id` | `uuid` | Required foreign key to `organization.id`. |
+| `title` | `text` | Required, non-blank summary of the issue. |
+| `description` | `text` | Required problem description for the initial workflow. |
+| `status` | `text` | Required; one of the four case states below. |
+| `version` | `bigint` | Required positive revision number, initially `1`. |
+| `created_at` | `timestamptz` | Required creation timestamp. |
+| `updated_at` | `timestamptz` | Required last-update timestamp. |
 
-- `case_record.organization_id` and `ai_suggestion.case_id` are `NOT NULL`. A case cannot exist without an owner, and a suggestion cannot exist without a case.
-- Foreign keys reject references to organizations or cases that do not exist.
-- `organization.slug` is unique.
+`organization_id` identifies the **customer that owns the case**, not the engineer assigned to it. Assignment will be modeled after user identities and assignment rules are defined.
 
-**Required values**
+### `ai_suggestion`
 
-- Identifiers, `name`, `slug`, `title`, `status`, `version`, `case_version`, `model_id`, `prompt_version`, and all timestamps are `NOT NULL`.
-- Suggestion content fields are stored only after the model output has passed schema validation (DEC-002). Which of them may be empty is an open decision.
+| Attribute | Proposed type | Rule or purpose |
+|---|---|---|
+| `id` | `uuid` | Primary key. |
+| `case_id` | `uuid` | Required foreign key to `case_record.id`. |
+| `case_version` | `bigint` | Required positive number; the case revision used as model input. |
+| `proposed_category` | `text` | AI-proposed issue category. |
+| `proposed_urgency` | `text` | AI-proposed urgency. |
+| `reasoning` | `text` | Model-provided explanation; not authoritative evidence by itself. |
+| `suggested_next_step` | `text` | Proposed next investigation or action. |
+| `model_id` | `text` | Identifier of the model used. |
+| `prompt_version` | `text` | Identifier of the prompt definition used. |
+| `created_at` | `timestamptz` | Required suggestion creation timestamp. |
 
-**Valid status values**
+The application will validate a model response before storing it as a usable suggestion. Values such as `model_id` and `prompt_version` identify its provenance; they do not make its contents trustworthy. The full run evidence and sanitized input/output for the first experiment will be recorded under `evaluations/`.
 
-- `case_record.status` must be one of `NEW`, `IN_REVIEW`, or `CLOSED`. The database rejects any other value.
-- Allowed transitions between those values are enforced by application operations, not by this constraint alone.
+The exact category and urgency vocabularies are still open; their allowed values should be defined before the relevant schema and model-output validation are finalized.
 
-**Revisions**
+## 4. Case lifecycle
 
-- `case_record.version` starts at 1 and increases with each meaningful change to the case.
-- `ai_suggestion.case_version` must equal the referenced case's version at the moment the suggestion is created. The application must read the case and insert the suggestion consistently. A plain foreign key cannot check this, because only the current version is stored.
+The initial lifecycle contains four states:
 
-**Deletion**
+```mermaid
+flowchart LR
+    A[NEW] --> B[IN_REVIEW]
+    B --> C[RESOLVED]
+    C --> D[CLOSED]
+```
 
-- A record must not silently lose its history through unintended cascading deletion. Until a deletion and retention policy is agreed, foreign keys do not use `ON DELETE CASCADE`, so deleting an organization with cases, or a case with suggestions, is rejected.
+| State | Business meaning |
+|---|---|
+| `NEW` | A case has been recorded but investigation has not started. |
+| `IN_REVIEW` | An engineer is investigating or handling the case. |
+| `RESOLVED` | A resolution has been recorded; final closure is still pending. |
+| `CLOSED` | The case has been formally closed. |
 
-**Separation of case state and AI suggestions**
+These arrows define the **initial happy path**, not a complete transition policy. Whether a resolved case can return to review, a closed case can reopen, or particular roles can close a case remains an open business decision.
 
-- `case_record.status` is the only authoritative case state. Nothing in `ai_suggestion` changes it.
-- A suggestion is an input to a human decision. Accepting a suggestion and changing case state are separate operations (DEC-003).
+A database `CHECK` constraint can reject an unknown status, but it does not by itself enforce which status transitions are permitted. Those rules require controlled application operations, authorization checks, and transactional updates.
 
-**Authorization is not provided by foreign keys**
+## 5. Integrity and ownership rules
 
-- A foreign key proves that a referenced organization or case exists. It does not prove that the user or service making the request is allowed to access it.
-- Every read and write must be scoped to the caller's permitted organizations by the application (and later, possibly, by database row-level security).
-- `ai_suggestion` has no `organization_id` of its own; its organization is reached through `case_record`. Queries for suggestions must therefore join through the case and apply the organization filter. This is the starting point for the later multi-tenancy work.
+The first PostgreSQL migration should enforce the rules it can reliably express:
 
-## 5. Open decisions
+1. **Identity:** Each table has a primary key. `organization.slug` is unique.
+2. **Required data:** Required attributes cannot be `NULL`; text inputs that must contain content should also reject blank strings.
+3. **Referential integrity:** A case cannot reference an unknown organization; a suggestion cannot reference an unknown case.
+4. **Valid state:** `case_record.status` must be one of `NEW`, `IN_REVIEW`, `RESOLVED`, or `CLOSED`.
+5. **Revision values:** `case_record.version` and `ai_suggestion.case_version` must be positive integers.
+6. **Deletion safety:** Do not cascade-delete cases or suggestions when an organization or case is removed. The initial model should restrict such deletions until retention and deletion policies are decided.
 
-These items are deliberately deferred and should be settled by small design decisions and tests:
+Other guarantees need more than a foreign key or `CHECK` constraint:
 
-- **Status transitions:** which moves between `NEW`, `IN_REVIEW`, and `CLOSED` are allowed, and by which role.
-- **Category and urgency values:** whether suggestion fields use a fixed vocabulary, and how unknown model values are handled.
-- **Users and assignment:** the user model, role membership per organization, and case assignment.
-- **Case history:** how the traceable history in FR-03 is stored (for example, a history table or event records).
-- **Review decisions:** how an engineer's decision on a specific suggestion is recorded and linked to `case_version` (FR-06, FR-07).
-- **Model execution record:** whether invocation details (latency, token usage, raw output, errors) move from `evaluations/` into the database.
-- **Tenant key on suggestions:** whether to copy `organization_id` onto `ai_suggestion`, with a composite foreign key that keeps it consistent with the case, to support row-level security.
-- **Deletion and retention:** when organizations, cases, and suggestions may be deleted, archived, or anonymized.
-- **Implementation details:** how UUIDs are generated, whether status uses a `CHECK` constraint, enum, or lookup table, and how `version` and `updated_at` are maintained.
+- **Tenant authorization:** The application must verify the caller's permitted organization(s) on every protected access path. A valid `organization_id` is not proof of permission. Database row-level security may provide another enforcement layer, but it is not implemented by this model alone.
+- **Valid state transitions:** The application must check the current state, the requested transition, and the actor's permission.
+- **Concurrent updates:** A future case update should compare the expected `version` and increment it atomically on success; an outdated request should fail rather than silently overwrite newer state.
+- **Suggestion freshness:** If a suggestion was generated from case version `3` but the current case is version `4`, it must not be approved for execution without reassessment. Recording `case_version` allows that check but does not perform it automatically.
+- **AI authority:** The model must not be given a direct database write path to case state. Suggestions are data for review, not commands.
+- **History and approvals:** A current `status` and `updated_at` timestamp do not provide a complete audit trail or approval record. Those capabilities require additional design and tables in later increments.
+
+## 6. Example cases the model must support
+
+**Two separate customers.** Customer A and Customer B each have their own case records. A foreign key ensures ownership references a real organization; authorization rules must prevent either customer from accessing the other's records.
+
+**Repeated triage.** A case receives one suggestion, then its description changes and the case version increases. A second suggestion can be stored without overwriting the first. The earlier suggestion remains identifiable as based on an older case revision.
+
+**Unavailable AI.** A case can be created and its status managed through authorized application operations even if no suggestion exists.
+
+**Model proposes closure.** A suggestion may recommend closing a case, but `case_record.status` does not change until an authorized application operation validates and commits an allowed transition.
+
+## 7. Deferred decisions
+
+- User identities, roles, engineer assignment, and how users are associated with organizations.
+- Full transition rules, including reopening and who may resolve or close cases.
+- Approval records and case-event history; both are required before claiming a complete reviewed workflow.
+- Controlled vocabularies for category and urgency.
+- Whether `description` may be absent for imported or partial cases.
+- Data retention, deletion, and organization offboarding rules.
+- The exact source and format of case revision and model execution evidence.
+- Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
+
+**Implementation status:** Design-only. The next step is to write `db/001_init.sql`, insert synthetic organizations and cases, and test that invalid values and references are rejected. Passing these tests will establish basic relational integrity, **not** full tenant isolation or authorization.
