@@ -62,7 +62,7 @@ This checklist describes **project progress**, not the complete feature plan. It
 
 - [Requirements](docs/requirements.md) — business problem, expected behavior, invariants, and acceptance checks.
 - [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
-- [Data model](docs/data-model.md) — proposed relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
+- [Data model](docs/data-model.md) — initial relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
 
@@ -82,7 +82,7 @@ cd Enterprise-AI-Service-Operations
 ### 2. Start PostgreSQL
 
 ```bash
-docker run -d --name eaiso-postgres -e POSTGRES_USER=eaiso_dev -e POSTGRES_PASSWORD=local-dev-only -e POSTGRES_DB=eaiso_dev -p 127.0.0.1:5432:5432 -v eaiso_pgdata:/var/lib/postgresql/data postgres:17
+docker run -d --name eaiso-postgres -e POSTGRES_USER=eaiso_dev -e POSTGRES_PASSWORD=local-dev-only -e POSTGRES_DB=eaiso_dev -p 127.0.0.1:5432:5432 -v eaiso_pgdata:/var/lib/postgresql/data postgres:16
 ```
 
 These credentials are for an isolated local development environment only. Choose different, private credentials for any shared or deployed environment. The port is bound to the local machine, not the network. Ensure TCP port `5432` is available.

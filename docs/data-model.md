@@ -13,7 +13,7 @@ The starting model has three entities:
 - `case_record` — the authoritative record of a service case, including its current status.
 - `ai_suggestion` — a proposed assessment generated for a particular version of a case.
 
-PostgreSQL is the proposed system of record. This document covers the logical structure and intended database constraints. The first migration and its negative tests will be implemented separately.
+PostgreSQL is the selected initial system of record. This document covers the logical structure and database constraints. The first migration implements them in [`db/001_init.sql`](../db/001_init.sql); its negative tests are being added separately.
 
 ## 2. Entity relationships
 
