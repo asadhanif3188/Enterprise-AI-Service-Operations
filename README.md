@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development — requirements and the initial data model are documented. The PostgreSQL schema and synthetic seed data form the first implementation increment; the application itself is not runnable yet.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are available. Application services and AI integration are not yet implemented. Database integrity testing is in progress.
 
 ## The problem
 
@@ -47,11 +47,14 @@ No real customer data or private third-party project materials are used.
 
 ## Current progress
 
-- [x] Define the initial business problem and requirements.
-- [ ] Validate the first relational schema with positive and negative tests.
+- [x] Define initial business requirements and architecture boundaries.
+- [x] Design the initial relational data model.
+- [x] Implement the initial PostgreSQL migration.
+- [x] Add synthetic development seed data.
+- [ ] Complete and publish database integrity tests.
 - [ ] Record and validate a real-model triage response.
 - [ ] Deliver an authorized end-to-end case workflow.
-- [ ] Add repeatable deployment and operational evidence.
+- [ ] Add repeatable application deployment and operational evidence.
 
 This checklist describes **project progress**, not the complete feature plan. It will be updated as working evidence becomes available.
 
@@ -65,7 +68,9 @@ Architecture decisions, test evidence, evaluation results, and operating instruc
 
 ## Local development: PostgreSQL
 
-The application is not runnable yet. The database schema can be initialized independently to test its constraints and relationships. The commands below assume Docker is installed and running, and that you are executing them from the repository root. The commands work in PowerShell or a Bash-compatible shell.
+The application services are not yet available. The PostgreSQL development database can be initialized using the migration and synthetic seed scripts below. These instructions cover the database foundation, not the complete application.
+
+The commands below assume Docker is installed and running, and that you are executing them from the repository root. The commands work in PowerShell or a Bash-compatible shell.
 
 ### 1. Clone the repository
 

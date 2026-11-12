@@ -1,7 +1,7 @@
 # Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Draft v0.1 — design baseline; not yet implemented
+**Status:** Draft v0.1 — initial PostgreSQL schema implemented; integrity verification in progress.
 
 ## 1. Purpose and scope
 
@@ -164,4 +164,4 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 - The exact source and format of case revision and model execution evidence.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
-**Implementation status:** Design-only. The next step is to write `db/001_init.sql`, insert synthetic organizations and cases, and test that invalid values and references are rejected. Passing these tests will establish basic relational integrity, **not** full tenant isolation or authorization.
+**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Database integrity tests are being added separately. The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.

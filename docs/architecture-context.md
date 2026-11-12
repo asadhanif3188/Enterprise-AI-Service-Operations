@@ -9,7 +9,7 @@ This document records the starting boundaries between the application and its AI
 
 The application is responsible for creating and storing service cases, identifying their owning organization, enforcing valid state transitions, and recording who made each decision. It also controls which users and services are allowed to read or change a case.
 
-PostgreSQL is the proposed system of record for cases, their history, and review outcomes. The application will access that data through defined business operations, not through model-generated commands.
+PostgreSQL has been selected as the initial system of record. The current schema stores organizations, service cases, and AI suggestion records. Case history and review outcomes will be modeled in later increments. The application will access that data through defined business operations, not through model-generated commands.
 
 **Why:** Case ownership, authorization, and status must remain consistent and auditable even when AI is unavailable.
 
