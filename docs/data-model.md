@@ -1,7 +1,7 @@
 # Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Draft v0.1 — initial PostgreSQL schema implemented; integrity verification in progress.
+**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)).
 
 ## 1. Purpose and scope
 
@@ -13,7 +13,7 @@ The starting model has three entities:
 - `case_record` — the authoritative record of a service case, including its current status.
 - `ai_suggestion` — a proposed assessment generated for a particular version of a case.
 
-PostgreSQL is the selected initial system of record. This document covers the logical structure and database constraints. The first migration implements them in [`db/001_init.sql`](../db/001_init.sql); its negative tests are being added separately.
+PostgreSQL is the selected initial system of record. This document covers the logical structure and database constraints. The first migration implements them in [`db/001_init.sql`](../db/001_init.sql), and [`tests/test_schema_integrity.sql`](../tests/test_schema_integrity.sql) verifies them.
 
 ## 2. Entity relationships
 
@@ -164,4 +164,4 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 - The exact source and format of case revision and model execution evidence.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
-**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Database integrity tests are being added separately. The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.
+**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.

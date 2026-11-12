@@ -1,7 +1,7 @@
 # Architecture Context
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Initial decisions — Day 1
+**Status:** Initial architecture decision baseline
 
 This document records the starting boundaries between the application and its AI component. These decisions guide the first implementation and may be revisited when requirements or evidence change.
 

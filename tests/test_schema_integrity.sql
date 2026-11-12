@@ -1,10 +1,10 @@
--- Day 4 relational integrity tests for the initial PostgreSQL schema.
+-- Relational integrity tests for the initial PostgreSQL schema.
 -- Prerequisites: db/001_init.sql and db/seed_dev.sql have been executed.
 -- Run with psql -v ON_ERROR_STOP=1. All probe writes are rolled back.
 
 BEGIN;
 
-DO $day4$
+DO $schema_integrity$
 DECLARE
     probe_org_id UUID;
     probe_case_id UUID;
@@ -24,11 +24,11 @@ BEGIN
 
     -- 2. Valid records should be accepted, with the expected defaults.
     INSERT INTO organization (name, slug)
-    VALUES ('Day 4 Integrity Probe', '__day4_integrity_probe__')
+    VALUES ('Schema Integrity Probe', '__schema_integrity_probe__')
     RETURNING id INTO probe_org_id;
 
     INSERT INTO case_record (organization_id, title, description)
-    VALUES (probe_org_id, 'Integrity probe case', 'Synthetic data for Day 4 testing.')
+    VALUES (probe_org_id, 'Integrity probe case', 'Synthetic data for schema integrity testing.')
     RETURNING id INTO probe_case_id;
 
     IF NOT EXISTS (
@@ -89,7 +89,7 @@ BEGIN
     -- 6. Reject a duplicate slug.
     BEGIN
         INSERT INTO organization (name, slug)
-        VALUES ('Different Organization', '__day4_integrity_probe__');
+        VALUES ('Different Organization', '__schema_integrity_probe__');
         RAISE EXCEPTION 'FAIL 06: duplicate organization slug was accepted';
     EXCEPTION WHEN unique_violation THEN
         RAISE NOTICE 'PASS 06: duplicate organization slug rejected';
@@ -151,9 +151,9 @@ BEGIN
         RAISE NOTICE 'PASS 11: referenced organization deletion rejected';
     END;
 
-    RAISE NOTICE 'ALL 11 DAY 4 DATABASE INTEGRITY CHECKS PASSED';
+    RAISE NOTICE 'ALL 11 SCHEMA INTEGRITY CHECKS PASSED';
 END;
-$day4$;
+$schema_integrity$;
 
 -- No probe rows are retained, including the successful inserts.
 ROLLBACK;

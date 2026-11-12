@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are available. Application services and AI integration are not yet implemented. Database integrity testing is in progress.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are available. Its relational integrity checks pass (11/11). Application services and AI integration are not yet implemented.
 
 ## The problem
 
@@ -51,7 +51,7 @@ No real customer data or private third-party project materials are used.
 - [x] Design the initial relational data model.
 - [x] Implement the initial PostgreSQL migration.
 - [x] Add synthetic development seed data.
-- [ ] Complete and publish database integrity tests.
+- [x] Complete and publish database integrity tests — [11/11 checks passed](tests/schema-integrity-results.md).
 - [ ] Record and validate a real-model triage response.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
@@ -63,6 +63,7 @@ This checklist describes **project progress**, not the complete feature plan. It
 - [Requirements](docs/requirements.md) — business problem, expected behavior, invariants, and acceptance checks.
 - [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
 - [Data model](docs/data-model.md) — initial relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
+- [Schema integrity validation](tests/schema-integrity-results.md) — test environment, reproduction steps, and observed results for the initial schema.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
 

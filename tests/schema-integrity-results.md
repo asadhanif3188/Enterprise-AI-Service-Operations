@@ -1,39 +1,39 @@
-# Day 4 — PostgreSQL Schema Integrity Test Results
+# PostgreSQL Schema Integrity Validation Report
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Test date:** 2026-11-12 (local development run)  
-**Status:** Passed — 11 of 11 checks reported as successful  
-**Evidence source:** Terminal output from the local Docker/`psql` run, supplied by the project maintainer
+**Run date:** 2026-11-12 (local development run)  
+**Result:** Passed — 11 of 11 checks  
+**Scope:** Relational integrity of the initial schema in [`db/001_init.sql`](../db/001_init.sql)
 
 ## Test environment
 
 | Item | Value |
 |---|---|
 | Environment | Local Windows development environment; PostgreSQL running in Docker |
+| PostgreSQL server | PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1), from `SELECT version();` |
 | Container | `eaiso-postgres` |
 | Database | `eaiso_dev` |
 | Database user | `eaiso_dev` |
-| Schema under test | `db/001_init.sql` |
-| Development data | `db/seed_dev.sql` |
-| Test script | `tests/test_schema_integrity.sql` |
-| PostgreSQL server version | Not captured in the supplied test output |
+| Schema under test | [`db/001_init.sql`](../db/001_init.sql) |
+| Development data | [`db/seed_dev.sql`](../db/seed_dev.sql) |
+| Test script | [`tests/test_schema_integrity.sql`](test_schema_integrity.sql) |
 
 The schema migration and synthetic seed data were applied before the test run. The test script assumes both are present.
 
 ## Reproduction
 
-From the repository root, with the PostgreSQL container running and the migration and seed data already applied:
+From the repository root in PowerShell, with the PostgreSQL container running and the migration and seed data already applied:
 
 ```powershell
 docker cp tests/test_schema_integrity.sql eaiso-postgres:/tmp/test_schema_integrity.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/test_schema_integrity.sql
 ```
 
-The `-v ON_ERROR_STOP=1` option instructs `psql` to stop on an unexpected SQL error. Expected constraint violations are handled within the test script, where the specific rejection is checked.
+The `-v ON_ERROR_STOP=1` option makes `psql` stop on an unexpected SQL error and return a nonzero exit code. Expected constraint violations are caught inside the test script, which checks that each rejection is the intended one (for `CHECK` constraints, by constraint name).
 
-## Observed results
+## Checks
 
-| ID | Check | Observed result |
+| ID | Check | Result |
 |---|---|---|
 | 01 | Seed organizations and cases are present for both fictional customers | PASS |
 | 02 | Valid organization, case, and suggestion inserts succeed; case defaults to `NEW` / version `1`; adding a suggestion leaves case state unchanged | PASS |
@@ -47,37 +47,44 @@ The `-v ON_ERROR_STOP=1` option instructs `psql` to stop on an unexpected SQL er
 | 10 | Nonpositive suggestion `case_version` is rejected | PASS |
 | 11 | Deleting an organization referenced by a case is rejected | PASS |
 
-The final output reported:
+## Observed output
+
+Output from running the current test script, with the script supplied to `psql` on standard input:
 
 ```text
-NOTICE:  PASS 01: synthetic seed organizations and cases exist
-NOTICE:  PASS 02: valid organization, case, suggestion, defaults, and unchanged case state
-NOTICE:  PASS 03: invalid case status rejected
-NOTICE:  PASS 04: missing organization_id rejected
-NOTICE:  PASS 05: unknown organization reference rejected
-NOTICE:  PASS 06: duplicate organization slug rejected
-NOTICE:  PASS 07: blank case title rejected
-NOTICE:  PASS 08: nonpositive case version rejected
-NOTICE:  PASS 09: unknown suggestion case reference rejected
-NOTICE:  PASS 10: nonpositive suggestion case_version rejected
-NOTICE:  PASS 11: referenced organization deletion rejected
-NOTICE:  ALL 11 DAY 4 DATABASE INTEGRITY CHECKS PASSED
+BEGIN
+psql:<stdin>:156: NOTICE:  PASS 01: synthetic seed organizations and cases exist
+psql:<stdin>:156: NOTICE:  PASS 02: valid organization, case, suggestion, defaults, and unchanged case state
+psql:<stdin>:156: NOTICE:  PASS 03: invalid case status rejected
+psql:<stdin>:156: NOTICE:  PASS 04: missing organization_id rejected
+psql:<stdin>:156: NOTICE:  PASS 05: unknown organization reference rejected
+psql:<stdin>:156: NOTICE:  PASS 06: duplicate organization slug rejected
+psql:<stdin>:156: NOTICE:  PASS 07: blank case title rejected
+psql:<stdin>:156: NOTICE:  PASS 08: nonpositive case version rejected
+psql:<stdin>:156: NOTICE:  PASS 09: unknown suggestion case reference rejected
+psql:<stdin>:156: NOTICE:  PASS 10: nonpositive suggestion case_version rejected
 DO
+psql:<stdin>:156: NOTICE:  PASS 11: referenced organization deletion rejected
+psql:<stdin>:156: NOTICE:  ALL 11 SCHEMA INTEGRITY CHECKS PASSED
 ROLLBACK
 ```
 
-The command returned to the terminal without a displayed error. A numerical shell exit code was not captured separately.
+`psql` exited with code `0`. The position of the `DO` line reflects interleaving of the standard output and notice streams, not the order of execution.
 
-## Data cleanup and interpretation
+An earlier run on the same date used a previous revision of the script that differed only in its probe names and final notice label. It also reported 11 of 11 checks passed.
 
-The test runs in a transaction and ends with `ROLLBACK`. The valid probe inserts used during testing are therefore discarded. The existing development seed records remain unchanged by those probe inserts.
+## Data cleanup
 
-These results demonstrate the tested **basic relational integrity** behaviors of the initial schema: required ownership, valid status values, positive revisions, foreign-key references, uniqueness, title validation, restricted deletion, and successful storage of a non-authoritative AI suggestion.
+The test runs in a single transaction that ends with `ROLLBACK`, so its probe rows, including the valid inserts in check 02, are discarded. A query after the run confirmed that no probe organization remained. The development seed records are not modified.
 
-They **do not** demonstrate tenant authorization or isolation, allowed lifecycle transitions, automatic version increments, optimistic concurrency, complete approval/audit history, or quality and safety of real model output. Those require separate implementation and verification.
+## Interpretation
 
-## Outcome and next step
+These results demonstrate the tested **basic relational integrity** behavior of the initial schema: required ownership, valid status values, positive revisions, foreign-key references, slug uniqueness, title validation, restricted deletion, and storage of a non-authoritative AI suggestion without changing case state.
 
-**Day 4 database-integrity evidence gate: passed (11/11 observed checks).**
+They **do not** demonstrate tenant authorization or isolation, allowed lifecycle transitions, automatic version increments, optimistic concurrency, approval or audit history, or the quality and safety of real model output. Those require separate implementation and verification.
 
-Commit this report alongside `tests/test_schema_integrity.sql`, then update the README checklist to mark the database integrity tests complete. The next planned activity is Day 5: a real-model triage experiment with structured-output validation and recorded provenance.
+## Outcome
+
+**Relational integrity validation of the initial schema: passed (11/11).**
+
+Further application capabilities, including AI triage with structured-output validation and recorded provenance, will be verified with their own tests and evidence.
