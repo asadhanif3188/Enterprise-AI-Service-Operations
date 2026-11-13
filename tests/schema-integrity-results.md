@@ -87,4 +87,4 @@ They **do not** demonstrate tenant authorization or isolation, allowed lifecycle
 
 **Relational integrity validation of the initial schema: passed (11/11).**
 
-Further application capabilities, including AI triage with structured-output validation and recorded provenance, will be verified with their own tests and evidence.
+This report covers database integrity only. A separate initial AI triage integration and its first recorded experiment are documented in [`docs/ai-triage-integration.md`](../docs/ai-triage-integration.md) and [`evaluations/model-run-01.json`](../evaluations/model-run-01.json). That experiment is a separate result and is not part of these 11 checks.

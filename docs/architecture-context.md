@@ -31,4 +31,13 @@ An AI suggestion may inform a person's decision, but accepting a suggestion and 
 
 ---
 
-**Current boundary:** These are design decisions, not claims that the controls are already implemented. The first schema and tests will establish the initial correctness checks; authentication, authorization, approval binding, and failure handling will be verified as their corresponding features are built.
+**Current implementation:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), and its relational integrity checks pass ([11/11](../tests/schema-integrity-results.md)). The initial local [AI triage CLI](ai-triage-integration.md) follows the suggestion-only write path described in DEC-002 and DEC-003:
+
+1. The model supplies a recommendation.
+2. Python validates it against a Pydantic output contract.
+3. Application-controlled code rechecks the case state and inserts the recommendation into `ai_suggestion`.
+4. In the [recorded run](../evaluations/model-run-01.json), the source case status and version remained unchanged (`NEW`, version `1`, before and after the write).
+
+The model has no database access; only application code writes.
+
+**Current boundary:** The CLI is a local development tool. It does not establish authentication, tenant authorization, production isolation, approval binding, or failure handling. Those controls will be verified as their corresponding features are built.

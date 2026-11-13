@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are available. Its relational integrity checks pass (11/11). Application services and AI integration are not yet implemented.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
 
 ## The problem
 
@@ -52,11 +52,13 @@ No real customer data or private third-party project materials are used.
 - [x] Implement the initial PostgreSQL migration.
 - [x] Add synthetic development seed data.
 - [x] Complete and publish database integrity tests — [11/11 checks passed](tests/schema-integrity-results.md).
-- [ ] Record and validate a real-model triage response.
+- [x] Record and validate a real-model triage response — [one synthetic-case run recorded](evaluations/model-run-01.json).
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
 This checklist describes **project progress**, not the complete feature plan. It will be updated as working evidence becomes available.
+
+The recorded model run shows that the integration can invoke a hosted model, validate its structured output, and store the result as a suggestion without changing case state. It is a single experiment, not an evaluation of model accuracy or a production-ready AI integration.
 
 ## Documentation
 
@@ -64,6 +66,9 @@ This checklist describes **project progress**, not the complete feature plan. It
 - [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
 - [Data model](docs/data-model.md) — initial relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
 - [Schema integrity validation](tests/schema-integrity-results.md) — test environment, reproduction steps, and observed results for the initial schema.
+- [AI triage integration](docs/ai-triage-integration.md) — suggestion-only integration boundary, run instructions, observed experiment, and limitations.
+- [Model output contract tests](tests/test_model_output.py) — offline checks of the structured triage output contract.
+- [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
 
@@ -143,6 +148,86 @@ docker start eaiso-postgres
 Data persists in the Docker named volume `eaiso_pgdata`. A normal container stop does not delete it. **Do not remove the volume unless you intend to discard local data.**
 
 The SQL scripts establish and populate the relational model; they do **not** yet prove tenant authorization, lifecycle transition enforcement, or safe concurrent updates. Those controls will be added and verified separately.
+
+## Local development: AI triage
+
+The AI triage integration is a local command-line experiment, not an application service. It reads the synthetic `northwind` case "Employees cannot connect to VPN", sends it to a hosted model, validates the structured response, and inserts the recommendation into `ai_suggestion`. It does not change the case's `status` or `version`. See [AI triage integration](docs/ai-triage-integration.md) for the design boundary and limitations.
+
+Before you start:
+
+- **The PostgreSQL database must already be initialized.** Complete steps 2–4 of the PostgreSQL setup above. The script stops if the synthetic seed case is not found.
+- **Each run makes one billable API call.** You need your own OpenAI API key with API billing enabled. Check your usage limits before running.
+- **Never commit the API key.** It belongs only in your local `.env` file, which `.gitignore` excludes.
+
+The commands below use Windows PowerShell and run from the repository root.
+
+### 1. Create a Python environment
+
+```powershell
+py -m venv .venv
+```
+
+The recorded run used Python 3.12.6.
+
+### 2. Install dependencies
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements-ai.txt
+```
+
+### 3. Create a local configuration file
+
+```powershell
+Copy-Item .env.example .env
+```
+
+### 4. Configure local settings
+
+Edit `.env` and set:
+
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Your own OpenAI API key. Required. |
+| `OPENAI_MODEL` | Model to request. Defaults to `gpt-4o-mini` if unset; the recorded run requested `gpt-4o-mini`. |
+| `DATABASE_URL` | PostgreSQL connection string. The example value matches the local container from the PostgreSQL setup above. |
+
+If a key is ever exposed, revoke it with the provider and create a new one.
+
+### 5. Run the offline model-output tests
+
+```powershell
+.venv\Scripts\python -m pytest tests/test_model_output.py -q
+```
+
+These tests check the Pydantic output contract with fixed inputs: a valid response, an unknown category, a blank reason, and an unexpected `status` field. They make no model or database calls and are not evidence of a real-model run.
+
+### 6. Run a triage experiment
+
+`evaluations/model-run-01.json` already contains the first recorded run and must not be overwritten. The script refuses to write to an existing evidence file and stops before calling the model, so a new experiment needs a different path:
+
+```powershell
+.venv\Scripts\python -m scripts.run_triage --evidence evaluations/model-run-02.json
+```
+
+Running `python -m scripts.run_triage` without `--evidence` uses the default path, `evaluations/model-run-01.json`, and therefore stops without making a model call.
+
+On success, the script prints the new suggestion ID, whether the case state was unchanged, the elapsed model request time, and the evidence file path. Each successful run adds a new row to `ai_suggestion`; earlier suggestions are not overwritten.
+
+Review a new evidence file before committing it. It contains the prompt, the case input, and the raw model output, so commit only evidence generated from synthetic data.
+
+### 7. Verify the stored suggestion
+
+```powershell
+docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -c "SELECT c.title, c.status, c.version, s.proposed_category, s.proposed_urgency, s.model_id, s.prompt_version FROM ai_suggestion s JOIN case_record c ON c.id = s.case_id ORDER BY s.created_at DESC LIMIT 5;"
+```
+
+A successful run adds a suggestion row with the model identifier and prompt version `triage-v1`. The source case keeps its existing status and version.
+
+### 8. Review the recorded experiment evidence
+
+[`evaluations/model-run-01.json`](evaluations/model-run-01.json) records the requested and actual model, prompt version and instructions, synthetic input, raw model output, validated recommendation, response status, elapsed time, token usage, runtime environment, and case state before and after the write. [AI triage integration — Observed experiment](docs/ai-triage-integration.md#observed-experiment) summarizes it.
+
+One recorded run demonstrates model invocation, structured-output validation, and suggestion-only persistence. It does not establish model accuracy, a latency baseline, or tenant authorization.
 
 ## Data and evidence
 

@@ -33,8 +33,9 @@ postgres-data/
 
 # --- Generated files that may contain sensitive inputs -----------------------
 # Raw prompts, model responses, request logs, and ad-hoc data exports can carry
-# case content or credentials. Keep them in these locations; publish only
-# reviewed, sanitized evidence under docs/.
+# case content or credentials. Keep unreviewed output in these locations.
+# Reviewed evidence from synthetic inputs is published under evaluations/
+# (experiment runs) and tests/ (test reports); those folders are not ignored.
 logs/
 *.log
 .local/

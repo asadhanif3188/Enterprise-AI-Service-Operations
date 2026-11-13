@@ -1,7 +1,7 @@
 # Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)).
+**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)); AI suggestion output contract enforced by the application.
 
 ## 1. Purpose and scope
 
@@ -97,9 +97,22 @@ An organization can have zero or many cases; each case belongs to exactly one or
 | `prompt_version` | `text` | Identifier of the prompt definition used. |
 | `created_at` | `timestamptz` | Required suggestion creation timestamp. |
 
-The application will validate a model response before storing it as a usable suggestion. Values such as `model_id` and `prompt_version` identify its provenance; they do not make its contents trustworthy. The full run evidence and sanitized input/output for the first experiment will be recorded under `evaluations/`.
+The initial Python adapter ([`src/model_adapter.py`](../src/model_adapter.py)) validates each model response against a Pydantic output contract before application code stores it as a usable suggestion:
 
-The exact category and urgency vocabularies are still open; their allowed values should be defined before the relevant schema and model-output validation are finalized.
+| Model output field | Stored in | Initial allowed values |
+|---|---|---|
+| `category` | `proposed_category` | `network`, `access`, `application`, `other` |
+| `urgency` | `proposed_urgency` | `low`, `medium`, `high` |
+| `reason` | `reasoning` | Non-blank text |
+| `suggested_next_step` | `suggested_next_step` | Non-blank text |
+
+The contract also rejects any additional field in the model output.
+
+These vocabularies are enforced by the application-level output contract, **not** by PostgreSQL `CHECK` constraints. They are initial working values for the first integration, not necessarily the final business taxonomy.
+
+The `ai_suggestion` schema still permits the four recommendation fields to be `NULL` and does not restrict their values. A row inserted directly with SQL therefore does not necessarily satisfy the application's usable-suggestion contract; the database accepting a row is not proof that it is a valid suggestion.
+
+Values such as `model_id` and `prompt_version` identify a suggestion's provenance; they do not make its contents trustworthy. The first actual suggestion and its model provenance are recorded in [`evaluations/model-run-01.json`](../evaluations/model-run-01.json).
 
 ## 4. Case lifecycle
 
@@ -125,14 +138,14 @@ A database `CHECK` constraint can reject an unknown status, but it does not by i
 
 ## 5. Integrity and ownership rules
 
-The first PostgreSQL migration should enforce the rules it can reliably express:
+The initial PostgreSQL migration enforces the rules it can reliably express:
 
 1. **Identity:** Each table has a primary key. `organization.slug` is unique.
-2. **Required data:** Required attributes cannot be `NULL`; text inputs that must contain content should also reject blank strings.
+2. **Required data:** Required attributes cannot be `NULL`; text inputs that must contain content also reject blank strings.
 3. **Referential integrity:** A case cannot reference an unknown organization; a suggestion cannot reference an unknown case.
 4. **Valid state:** `case_record.status` must be one of `NEW`, `IN_REVIEW`, `RESOLVED`, or `CLOSED`.
 5. **Revision values:** `case_record.version` and `ai_suggestion.case_version` must be positive integers.
-6. **Deletion safety:** Do not cascade-delete cases or suggestions when an organization or case is removed. The initial model should restrict such deletions until retention and deletion policies are decided.
+6. **Deletion safety:** Cases and suggestions are not cascade-deleted when an organization or case is removed. The initial migration restricts such deletions until retention and deletion policies are decided.
 
 Other guarantees need more than a foreign key or `CHECK` constraint:
 
@@ -158,10 +171,10 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 - User identities, roles, engineer assignment, and how users are associated with organizations.
 - Full transition rules, including reopening and who may resolve or close cases.
 - Approval records and case-event history; both are required before claiming a complete reviewed workflow.
-- Controlled vocabularies for category and urgency.
+- Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.
 - Whether `description` may be absent for imported or partial cases.
 - Data retention, deletion, and organization offboarding rules.
-- The exact source and format of case revision and model execution evidence.
+- Whether model execution evidence moves from evaluation files into a database record, and how case revisions are captured.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
-**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.
+**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). An initial local [AI triage integration](ai-triage-integration.md) writes application-validated suggestions to `ai_suggestion`. The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.
