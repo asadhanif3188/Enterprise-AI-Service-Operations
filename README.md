@@ -196,13 +196,13 @@ Edit `.env` and set:
 
 If a key is ever exposed, revoke it with the provider and create a new one.
 
-### 5. Run the offline model-output tests
+### 5. Run the offline tests
 
 ```powershell
-.venv\Scripts\python -m pytest tests/test_model_output.py -q
+.venv\Scripts\python -m pytest tests/test_model_output.py tests/test_triage_failures.py -m "not db" -q
 ```
 
-These tests check the Pydantic output contract with fixed inputs: a valid response, an unknown category, a blank reason, and an unexpected `status` field. They make no model or database calls and are not evidence of a real-model run.
+These tests check the Pydantic output contract with fixed inputs and simulate provider and dependency failures (timeout, refusal, incomplete response, existing evidence file). They make no model or database calls and are not evidence of a real-model run. The `-m "not db"` option excludes the PostgreSQL-backed tests, which need a separate `eaiso_test` database; see [AI triage failure-path validation](docs/ai-triage-failure-testing.md).
 
 ### 6. Run a triage experiment
 
