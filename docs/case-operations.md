@@ -32,6 +32,8 @@ No reopening, skipping states, or no-op transitions are allowed in this initial 
 
 **Version safety:** transitions use `SELECT ... FOR UPDATE`, check `expected_version`, and increment the version with the update. Other direct database writers can still bypass this service. The existing `scripts/run_triage.py` uses a separate check to reject stale suggestions.
 
+**No idempotent creation:** each successful `create_case` call inserts a new case, so a retried call creates a duplicate. A future create-case API is intended to accept a client-provided idempotency key; this is not implemented. See [Case creation semantics](case-creation-semantics.md).
+
 **Partial history only:** this table records status transitions made through this service. It does not record case creation, text edits, suggestion reviews, permissions, or failed decisions. It is not a complete audit trail.
 
 ## Running tests against the dedicated database

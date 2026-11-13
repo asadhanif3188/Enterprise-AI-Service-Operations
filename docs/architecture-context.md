@@ -3,7 +3,7 @@
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** Initial architecture decision baseline
 
-This document records the starting boundaries between the application and its AI component. These decisions guide the first implementation and may be revisited when requirements or evidence change.
+This document records the starting boundaries between the application and its AI component. These decisions guide the first implementation and may be revisited when requirements or evidence change. The [system context](system-context.md) shows the current components, capability status, and trust boundaries.
 
 ## DEC-001 — The application owns service-case data and workflow decisions
 
@@ -47,6 +47,6 @@ A local [case service](case-operations.md) ([`src/case_service.py`](../src/case_
 3. The status update and a `case_status_event` row ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)) are written in one transaction; if the event cannot be recorded, the status change is rolled back.
 4. AI suggestions are not an input to the transition operation.
 
-This service does **not** check authorization. The organization ID it receives filters queries but is supplied by the caller, and the recorded `actor_label` is not a verified identity or approval. The event table records status transitions made through the service only; it is not a complete or tamper-proof audit trail, and database clients with write access can bypass the service.
+This service does **not** check authorization. The organization ID it receives filters queries but is supplied by the caller, and the recorded `actor_label` is not a verified identity or approval. The event table records status transitions made through the service only; it is not a complete or tamper-proof audit trail, and database clients with write access can bypass the service. Case creation is not idempotent: each successful `create_case` call inserts a new case. The proposed idempotency-key contract is described in [Case creation semantics](case-creation-semantics.md).
 
 **Current boundary:** The CLI and the case service remain local development tools. Initial output-validation and [failure-path tests](../tests/ai-triage-failure-results.md) have passed, but these do not establish production-grade fault tolerance, authentication, tenant authorization, approval binding, or end-to-end recovery guarantees. Those controls will be verified as their corresponding features are built.

@@ -68,6 +68,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 
 - [Requirements](docs/requirements.md) — business problem, expected behavior, invariants, and acceptance checks.
 - [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
+- [System context](docs/system-context.md) — C4 system context, technical boundaries, capability status, data flows, and trust boundaries.
 - [Data model](docs/data-model.md) — initial relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
 - [Schema integrity validation](tests/schema-integrity-results.md) — test environment, reproduction steps, and observed results for the initial schema.
 - [AI triage integration](docs/ai-triage-integration.md) — suggestion-only integration boundary, run instructions, observed experiment, and limitations.
@@ -75,6 +76,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [AI triage failure-path validation](docs/ai-triage-failure-testing.md) — failure scenarios, test setup, and known limitations.
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
+- [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
 - [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.
 - [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
@@ -137,7 +139,7 @@ docker cp db/seed_dev.sql eaiso-postgres:/tmp/seed_dev.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/seed_dev.sql
 ```
 
-The seed file provides fictional organizations and sample cases. Avoid rerunning it unless you have checked its duplicate-handling behavior.
+The seed file provides fictional organizations and sample cases. Avoid rerunning it unless you have checked its duplicate-handling behavior. Its duplicate checks apply to development data only; see [Case creation semantics](docs/case-creation-semantics.md#22-development-seed-script).
 
 ### 5. Verify the data
 
