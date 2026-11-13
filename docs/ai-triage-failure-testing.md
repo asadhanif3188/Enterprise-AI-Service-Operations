@@ -1,6 +1,6 @@
 # AI Triage Failure-Path Validation
 
-**Status:** Test suite provided; execution evidence must be recorded from actual runs.
+**Status:** Initial failure-path validation completed. All 18 selected tests passed: 14 offline tests and 4 PostgreSQL-backed tests. See the [validation results](../tests/ai-triage-failure-results.md).
 
 ## Purpose
 
@@ -58,31 +58,47 @@ docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_test -v ON_ERROR_STOP=
 
 The tests create their own fictional organizations and cases, so the seed script is **not** required in `eaiso_test`. Do not rerun the migration if the test schema is already initialized.
 
-Set the test-only connection URL for the current PowerShell session:
+Set the test-only connection URL for the current terminal session.
+
+PowerShell:
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql://eaiso_dev:local-dev-only@127.0.0.1:5432/eaiso_test"
 ```
 
-Execute the database-backed tests:
+Windows Command Prompt (`cmd.exe`):
+
+```cmd
+set "TEST_DATABASE_URL=postgresql://eaiso_dev:local-dev-only@127.0.0.1:5432/eaiso_test"
+```
+
+Execute the database-backed tests (the same command works in both shells):
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_triage_failures.py -m db -q
 ```
 
-When finished, clear the variable from the current session:
+When finished, clear the variable from the current session.
+
+PowerShell:
 
 ```powershell
 Remove-Item Env:TEST_DATABASE_URL
+```
+
+Windows Command Prompt:
+
+```cmd
+set "TEST_DATABASE_URL="
 ```
 
 The tests clean up their probe rows using a fixture. Keep the test database for future regression runs, or review its contents before dropping it deliberately. Never remove the development database or its Docker volume to clean up these tests.
 
 ## Evidence and interpretation
 
-After executing the suite, create `tests/ai-triage-failure-results.md` with actual console output, Python/pytest/PostgreSQL versions, commands, run date, pass/fail/skip counts, and observed database outcomes. Do not publish expected results as if they were observed. A skipped database test is **not** a successful database validation.
+The observed results of the first execution are recorded in [`tests/ai-triage-failure-results.md`](../tests/ai-triage-failure-results.md): the commands used, the actual console output, pass and deselection counts, and the database outcomes asserted by each PostgreSQL-backed test. The PostgreSQL server version and Python/pytest package versions were not captured for that run. When the suite is rerun, record the new output rather than reusing these results; a skipped database test is **not** a successful database validation.
 
-Passing these tests would support narrowly scoped claims about output-contract rejection, exception propagation, stale-state checks, and rollback on a constraint error. The suite would **not** establish tenant isolation, safe approval execution, production fault tolerance, end-to-end retry semantics, semantic accuracy, or race-free concurrency under all workloads.
+These passing tests support narrowly scoped claims about output-contract rejection, exception propagation, stale-state checks, and rollback on a constraint error. They do **not** establish tenant isolation, safe approval execution, production fault tolerance, end-to-end retry semantics, semantic accuracy, or race-free concurrency under all workloads.
 
 **Caveat:** The case version check assumes case-writing operations correctly increment `case_record.version`. The current schema does not enforce this automatically. This suite probes mismatches that are already visible in stored state; it does not implement a full authorized case-update path.
 

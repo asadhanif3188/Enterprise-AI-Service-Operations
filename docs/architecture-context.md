@@ -40,4 +40,4 @@ An AI suggestion may inform a person's decision, but accepting a suggestion and 
 
 The model has no database access; only application code writes.
 
-**Current boundary:** The CLI is a local development tool. It does not establish authentication, tenant authorization, production isolation, approval binding, or failure handling. Those controls will be verified as their corresponding features are built.
+**Current boundary:** The CLI remains a local development tool. Initial output-validation and [failure-path tests](../tests/ai-triage-failure-results.md) have passed, but these do not establish production-grade fault tolerance, authentication, tenant authorization, approval binding, or end-to-end recovery guarantees. Those controls will be verified as their corresponding features are built.

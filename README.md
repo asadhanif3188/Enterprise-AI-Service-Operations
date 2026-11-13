@@ -53,6 +53,7 @@ No real customer data or private third-party project materials are used.
 - [x] Add synthetic development seed data.
 - [x] Complete and publish database integrity tests — [11/11 checks passed](tests/schema-integrity-results.md).
 - [x] Record and validate a real-model triage response — [one synthetic-case run recorded](evaluations/model-run-01.json).
+- [x] Validate AI triage output and failure paths — [18/18 selected tests passed](tests/ai-triage-failure-results.md).
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -68,6 +69,8 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Schema integrity validation](tests/schema-integrity-results.md) — test environment, reproduction steps, and observed results for the initial schema.
 - [AI triage integration](docs/ai-triage-integration.md) — suggestion-only integration boundary, run instructions, observed experiment, and limitations.
 - [Model output contract tests](tests/test_model_output.py) — offline checks of the structured triage output contract.
+- [AI triage failure-path validation](docs/ai-triage-failure-testing.md) — failure scenarios, test setup, and known limitations.
+- [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
