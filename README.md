@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
 
 ## The problem
 
@@ -54,8 +54,11 @@ No real customer data or private third-party project materials are used.
 - [x] Complete and publish database integrity tests — [11/11 checks passed](tests/schema-integrity-results.md).
 - [x] Record and validate a real-model triage response — [one synthetic-case run recorded](evaluations/model-run-01.json).
 - [x] Validate AI triage output and failure paths — [18/18 selected tests passed](tests/ai-triage-failure-results.md).
+- [x] Implement version-checked case transitions with event history in a local service — [16/16 tests passed](tests/case-operations-results.md) (8 PostgreSQL-backed, 8 offline policy). This is not yet an authenticated or authorized API.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
+
+The case service enforces an initial forward-only lifecycle (`NEW` → `IN_REVIEW` → `RESOLVED` → `CLOSED`), rejects stale updates, and records each transition in the same transaction as the status change. The organization ID it receives filters queries but is not an authorization check, and the actor label is not a verified identity. The case history covers status transitions only, not a complete audit trail.
 
 This checklist describes **project progress**, not the complete feature plan. It will be updated as working evidence becomes available.
 
@@ -71,6 +74,8 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Model output contract tests](tests/test_model_output.py) — offline checks of the structured triage output contract.
 - [AI triage failure-path validation](docs/ai-triage-failure-testing.md) — failure scenarios, test setup, and known limitations.
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
+- [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
+- [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.
 - [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
 Architecture decisions, test evidence, evaluation results, and operating instructions will be added alongside the relevant implementation work.
@@ -104,14 +109,26 @@ docker exec eaiso-postgres pg_isready -U eaiso_dev -d eaiso_dev
 
 If the container already exists from an earlier session, start it with `docker start eaiso-postgres` instead of running `docker run` again.
 
-### 3. Apply the initial schema (once per fresh database)
+### 3. Apply the schema migrations (once each, in order)
+
+For a fresh database, apply both migrations:
 
 ```bash
 docker cp db/001_init.sql eaiso-postgres:/tmp/001_init.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/001_init.sql
+docker cp db/002_case_status_events.sql eaiso-postgres:/tmp/002_case_status_events.sql
+docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/002_case_status_events.sql
 ```
 
-This migration creates `organization`, `case_record`, and `ai_suggestion`. It is intended for a fresh database; **do not rerun it against an already initialized database**.
+`001_init.sql` creates `organization`, `case_record`, and `ai_suggestion`. `002_case_status_events.sql` adds `case_status_event`, the status-transition history used by the [local case service](docs/case-operations.md). **Do not rerun a migration against a database where it has already been applied.**
+
+If your development database was initialized before `002_case_status_events.sql` existed, check whether the event table is present:
+
+```bash
+docker exec eaiso-postgres psql -U eaiso_dev -d eaiso_dev -c "SELECT to_regclass('public.case_status_event');"
+```
+
+An empty result means the table is missing: apply only the last two commands above (`002_case_status_events.sql`). Do not reapply `001_init.sql`. The dedicated `eaiso_test` database used by the database-backed tests needs the same migration; see [Controlled case operations](docs/case-operations.md#running-tests-against-the-dedicated-database).
 
 ### 4. Load synthetic development data
 

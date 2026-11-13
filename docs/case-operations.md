@@ -1,6 +1,6 @@
 # Controlled Case Operations — Initial Implementation
 
-**Status:** Implementation and test suite prepared; database-backed results must be recorded after execution.
+**Status:** Implemented as a local service. Validation passed: 16 of 16 tests (8 PostgreSQL-backed and 8 offline transition-policy cases, in two separate runs). See the [validation results](../tests/case-operations-results.md).
 
 ## Why this increment exists
 
@@ -61,9 +61,11 @@ set "TEST_DATABASE_URL="
 
 Do not treat a skip as a pass. The tests create uniquely named synthetic records in `eaiso_test` and attempt cleanup after each test.
 
-## Evidence requirements
+## Evidence
 
-After running tests, record **observed**, not expected, output under `tests/case-operations-results.md`. Include migration output, selected/deselected/failed counts, environment, and known limitations. Link the report from the README only after it exists. Do not alter previous model-run or failure-test evidence.
+The observed results are recorded in [`tests/case-operations-results.md`](../tests/case-operations-results.md). The 8 PostgreSQL-backed tests (`-m db`) and the 8 offline transition-policy cases (`-m "not db"`) were run separately, and all 16 passed. Those runs did not capture migration output, the PostgreSQL server version, or a post-run inspection of test-row cleanup.
+
+A deselected test is not a pass, and a skip is not a pass. Record **observed**, not expected, output when adding new evidence, and do not alter previous model-run, failure-test, or case-operations results. Keep raw terminal output outside the repository, because it contains machine-specific paths.
 
 ## Remaining work
 

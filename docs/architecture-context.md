@@ -9,7 +9,7 @@ This document records the starting boundaries between the application and its AI
 
 The application is responsible for creating and storing service cases, identifying their owning organization, enforcing valid state transitions, and recording who made each decision. It also controls which users and services are allowed to read or change a case.
 
-PostgreSQL has been selected as the initial system of record. The current schema stores organizations, service cases, and AI suggestion records. Case history and review outcomes will be modeled in later increments. The application will access that data through defined business operations, not through model-generated commands.
+PostgreSQL has been selected as the initial system of record. The current schema stores organizations, service cases, AI suggestion records, and case status-transition events. A complete case history and review outcomes will be modeled in later increments. The application will access that data through defined business operations, not through model-generated commands.
 
 **Why:** Case ownership, authorization, and status must remain consistent and auditable even when AI is unavailable.
 
@@ -40,4 +40,13 @@ An AI suggestion may inform a person's decision, but accepting a suggestion and 
 
 The model has no database access; only application code writes.
 
-**Current boundary:** The CLI remains a local development tool. Initial output-validation and [failure-path tests](../tests/ai-triage-failure-results.md) have passed, but these do not establish production-grade fault tolerance, authentication, tenant authorization, approval binding, or end-to-end recovery guarantees. Those controls will be verified as their corresponding features are built.
+A local [case service](case-operations.md) ([`src/case_service.py`](../src/case_service.py)) implements the application-rule part of DEC-003. Its [validation tests passed (16/16)](../tests/case-operations-results.md).
+
+1. Transitions follow an initial forward-only policy: `NEW` → `IN_REVIEW` → `RESOLVED` → `CLOSED`. Skipped, backward, no-op, and post-closure transitions are rejected.
+2. Each transition locks the case row, compares the caller's expected `version`, and increments it with the status change, so a stale request fails instead of overwriting newer state.
+3. The status update and a `case_status_event` row ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)) are written in one transaction; if the event cannot be recorded, the status change is rolled back.
+4. AI suggestions are not an input to the transition operation.
+
+This service does **not** check authorization. The organization ID it receives filters queries but is supplied by the caller, and the recorded `actor_label` is not a verified identity or approval. The event table records status transitions made through the service only; it is not a complete or tamper-proof audit trail, and database clients with write access can bypass the service.
+
+**Current boundary:** The CLI and the case service remain local development tools. Initial output-validation and [failure-path tests](../tests/ai-triage-failure-results.md) have passed, but these do not establish production-grade fault tolerance, authentication, tenant authorization, approval binding, or end-to-end recovery guarantees. Those controls will be verified as their corresponding features are built.
