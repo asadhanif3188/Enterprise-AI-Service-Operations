@@ -1,19 +1,20 @@
 # Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)); AI suggestion output contract enforced by the application.
+**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)); AI suggestion output contract enforced by the application; case status-transition history added and exercised through a local case service ([16/16 tests passed](../tests/case-operations-results.md)).
 
 ## 1. Purpose and scope
 
 This document defines the first relational model for service cases and AI-assisted triage. It follows the business requirements in [`requirements.md`](requirements.md) and the ownership decisions in [`architecture-context.md`](architecture-context.md).
 
-The starting model has three entities:
+The model has four entities:
 
 - `organization` — a customer organization whose cases must be kept separate from other customers' cases.
 - `case_record` — the authoritative record of a service case, including its current status.
 - `ai_suggestion` — a proposed assessment generated for a particular version of a case.
+- `case_status_event` — a record of one status transition applied to a case, linking the revision before and after the change.
 
-PostgreSQL is the selected initial system of record. This document covers the logical structure and database constraints. The first migration implements them in [`db/001_init.sql`](../db/001_init.sql), and [`tests/test_schema_integrity.sql`](../tests/test_schema_integrity.sql) verifies them.
+PostgreSQL is the selected initial system of record. This document covers the logical structure and database constraints. The first three entities are implemented in [`db/001_init.sql`](../db/001_init.sql) and verified by [`tests/test_schema_integrity.sql`](../tests/test_schema_integrity.sql). `case_status_event` is added by [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) and exercised through the local case service by [`tests/test_case_service.py`](../tests/test_case_service.py).
 
 ## 2. Entity relationships
 
@@ -21,6 +22,7 @@ PostgreSQL is the selected initial system of record. This document covers the lo
 erDiagram
     organization ||--o{ case_record : owns
     case_record ||--o{ ai_suggestion : has
+    case_record ||--o{ case_status_event : records
 
     organization {
         uuid id PK
@@ -52,9 +54,20 @@ erDiagram
         text prompt_version
         timestamptz created_at
     }
+
+    case_status_event {
+        uuid id PK
+        uuid case_id FK
+        text from_status
+        text to_status
+        bigint from_version
+        bigint to_version
+        text actor_label
+        timestamptz occurred_at
+    }
 ```
 
-An organization can have zero or many cases; each case belongs to exactly one organization. A case can have zero or many AI suggestions; each suggestion refers to exactly one case. We keep multiple suggestions because a case may be evaluated again after its contents change.
+An organization can have zero or many cases; each case belongs to exactly one organization. A case can have zero or many AI suggestions; each suggestion refers to exactly one case. We keep multiple suggestions because a case may be evaluated again after its contents change. A case can have zero or many status events, at most one per resulting revision; a newly created case has none.
 
 ## 3. Entities and attributes
 
@@ -114,6 +127,23 @@ The `ai_suggestion` schema still permits the four recommendation fields to be `N
 
 Values such as `model_id` and `prompt_version` identify a suggestion's provenance; they do not make its contents trustworthy. The first actual suggestion and its model provenance are recorded in [`evaluations/model-run-01.json`](../evaluations/model-run-01.json).
 
+### `case_status_event`
+
+| Attribute | Proposed type | Rule or purpose |
+|---|---|---|
+| `id` | `uuid` | Primary key. |
+| `case_id` | `uuid` | Required foreign key to `case_record.id`. |
+| `from_status` | `text` | Required; status before the transition, one of the four case states. |
+| `to_status` | `text` | Required; status after the transition, one of the four case states. |
+| `from_version` | `bigint` | Required positive case revision before the transition. |
+| `to_version` | `bigint` | Required; must equal `from_version + 1`. Unique per case. |
+| `actor_label` | `text` | Required, non-blank label supplied by the caller. Not a verified identity. |
+| `occurred_at` | `timestamptz` | Required event timestamp. |
+
+The [local case service](case-operations.md) inserts one event in the same transaction as each status change it applies, so the event and the new case state are committed or rolled back together. The table records **status transitions made through that service only**. It does not record case creation, text edits, suggestion reviews, or rejected requests, and the database does not prevent a client with write access from editing or deleting events. It is a partial history, not a complete or tamper-proof audit trail.
+
+`actor_label` is a diagnostic value such as `local-synthetic-operator`. It is not proof of who acted or that they were permitted to act.
+
 ## 4. Case lifecycle
 
 The initial lifecycle contains four states:
@@ -132,29 +162,31 @@ flowchart LR
 | `RESOLVED` | A resolution has been recorded; final closure is still pending. |
 | `CLOSED` | The case has been formally closed. |
 
-These arrows define the **initial happy path**, not a complete transition policy. Whether a resolved case can return to review, a closed case can reopen, or particular roles can close a case remains an open business decision.
+The local case service ([`src/case_service.py`](../src/case_service.py)) enforces exactly this path as its initial development policy: each transition moves one step forward, and skipped, backward, no-op, and post-closure transitions are rejected. This is an intentionally narrow rule, not a complete business policy. Whether a resolved case can return to review, a closed case can reopen, or particular roles can close a case remains an open business decision.
 
-A database `CHECK` constraint can reject an unknown status, but it does not by itself enforce which status transitions are permitted. Those rules require controlled application operations, authorization checks, and transactional updates.
+A database `CHECK` constraint can reject an unknown status, but it does not by itself enforce which status transitions are permitted. The transition policy is enforced in the case service, not by the database; a direct SQL update can still bypass it. Authorization checks on transitions are not yet implemented.
 
 ## 5. Integrity and ownership rules
 
-The initial PostgreSQL migration enforces the rules it can reliably express:
+The PostgreSQL migrations enforce the rules they can reliably express:
 
 1. **Identity:** Each table has a primary key. `organization.slug` is unique.
 2. **Required data:** Required attributes cannot be `NULL`; text inputs that must contain content also reject blank strings.
-3. **Referential integrity:** A case cannot reference an unknown organization; a suggestion cannot reference an unknown case.
-4. **Valid state:** `case_record.status` must be one of `NEW`, `IN_REVIEW`, `RESOLVED`, or `CLOSED`.
-5. **Revision values:** `case_record.version` and `ai_suggestion.case_version` must be positive integers.
-6. **Deletion safety:** Cases and suggestions are not cascade-deleted when an organization or case is removed. The initial migration restricts such deletions until retention and deletion policies are decided.
+3. **Referential integrity:** A case cannot reference an unknown organization; a suggestion or status event cannot reference an unknown case.
+4. **Valid state:** `case_record.status`, `case_status_event.from_status`, and `case_status_event.to_status` must be one of `NEW`, `IN_REVIEW`, `RESOLVED`, or `CLOSED`.
+5. **Revision values:** `case_record.version`, `ai_suggestion.case_version`, and `case_status_event.from_version` must be positive integers. Each event's `to_version` must equal `from_version + 1`, and a case can have only one event per `to_version`.
+6. **Deletion safety:** Cases, suggestions, and status events are not cascade-deleted when an organization or case is removed. The migrations restrict such deletions until retention and deletion policies are decided.
+
+The database does **not** check that an event's statuses form an allowed transition, that `from_status` differs from `to_status`, or that an event matches the case's actual current state. Those rules are applied by the case service when it writes events.
 
 Other guarantees need more than a foreign key or `CHECK` constraint:
 
-- **Tenant authorization:** The application must verify the caller's permitted organization(s) on every protected access path. A valid `organization_id` is not proof of permission. Database row-level security may provide another enforcement layer, but it is not implemented by this model alone.
-- **Valid state transitions:** The application must check the current state, the requested transition, and the actor's permission.
-- **Concurrent updates:** A future case update should compare the expected `version` and increment it atomically on success; an outdated request should fail rather than silently overwrite newer state.
-- **Suggestion freshness:** If a suggestion was generated from case version `3` but the current case is version `4`, it must not be approved for execution without reassessment. Recording `case_version` allows that check but does not perform it automatically.
-- **AI authority:** The model must not be given a direct database write path to case state. Suggestions are data for review, not commands.
-- **History and approvals:** A current `status` and `updated_at` timestamp do not provide a complete audit trail or approval record. Those capabilities require additional design and tables in later increments.
+- **Tenant authorization:** The application must verify the caller's permitted organization(s) on every protected access path. A valid `organization_id` is not proof of permission. The case service filters reads and transitions by a caller-supplied organization ID, which is query scoping, not authorization. Database row-level security may provide another enforcement layer, but it is not implemented by this model alone.
+- **Valid state transitions:** The case service checks the current state against the initial forward-only policy. It does not yet check the actor's permission.
+- **Concurrent updates:** The case service locks the case row, compares the caller's expected `version`, and increments it atomically with the status change; an outdated request fails rather than overwriting newer state. The schema does not increment `version` automatically, so writers that bypass the service are not covered.
+- **Suggestion freshness:** If a suggestion was generated from case version `3` but the current case is version `4`, it must not be approved for execution without reassessment. Recording `case_version` allows that check but does not perform it automatically. The triage CLI rechecks the case version before storing a new suggestion.
+- **AI authority:** The model must not be given a direct database write path to case state. Suggestions are data for review, not commands, and are not an input to the case service's transition operation.
+- **History and approvals:** `case_status_event` records status transitions applied through the case service. It does not provide a complete audit trail or an approval record; those capabilities require additional design and tables in later increments.
 
 ## 6. Example cases the model must support
 
@@ -166,15 +198,17 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 
 **Model proposes closure.** A suggestion may recommend closing a case, but `case_record.status` does not change until an authorized application operation validates and commits an allowed transition.
 
+**Competing updates.** Two requests try to move the same case from version `1` at the same time. The first to acquire the row lock succeeds and records one event; the other finds version `2` and is rejected as stale, without writing an event.
+
 ## 7. Deferred decisions
 
 - User identities, roles, engineer assignment, and how users are associated with organizations.
 - Full transition rules, including reopening and who may resolve or close cases.
-- Approval records and case-event history; both are required before claiming a complete reviewed workflow.
+- Approval records and a complete case history covering creation, content edits, and review decisions; both are required before claiming a complete reviewed workflow. The current status-transition events are only part of that history.
 - Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.
 - Whether `description` may be absent for imported or partial cases.
 - Data retention, deletion, and organization offboarding rules.
 - Whether model execution evidence moves from evaluation files into a database record, and how case revisions are captured.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
-**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). An initial local [AI triage integration](ai-triage-integration.md) writes application-validated suggestions to `ai_suggestion`. The schema provides structural constraints and referential integrity but does **not** yet establish tenant authorization, workflow transition enforcement, or safe concurrent updates.
+**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). An initial local [AI triage integration](ai-triage-integration.md) writes application-validated suggestions to `ai_suggestion`. [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) adds `case_status_event`, and a local [case service](case-operations.md) applies forward-only, version-checked transitions with transactional event recording ([16/16 tests passed](../tests/case-operations-results.md)). The schema provides structural constraints and referential integrity. Transition rules and version checks are enforced by the case service, not the database, and tenant authorization is **not** yet established.
