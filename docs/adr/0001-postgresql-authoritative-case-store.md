@@ -1,7 +1,7 @@
 # ADR-0001: PostgreSQL as the Authoritative Case Store
 
 - **Status:** Accepted
-- **Recorded:** 2026-11-14
+- **Recorded:** 2026-11-12
 - **Decision provenance:** Retrospective reconstruction. This ADR formalizes the earlier note [DEC-001](../architecture-context.md#dec-001--the-application-owns-service-case-data-and-workflow-decisions), "The application owns service-case data and workflow decisions", first committed on 2026-11-11. The options below were reconstructed for transparent comparison; they were not formally evaluated or benchmarked when PostgreSQL was selected.
 - **Legacy reference:** DEC-001
 - **Related requirements:** FR-01, FR-02, FR-03, FR-09; rules "Organization ownership", "Source of truth", "Concurrency", and "Reporting boundaries" ([requirements](../requirements.md))

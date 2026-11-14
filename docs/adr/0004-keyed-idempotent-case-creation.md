@@ -1,7 +1,7 @@
 # ADR-0004: Keyed Idempotent Case Creation
 
 - **Status:** Proposed
-- **Recorded:** 2026-11-14
+- **Recorded:** 2026-11-13
 - **Decision provenance:** Contemporary proposal. It formalizes the design direction first documented in [Case creation semantics, section 3](../case-creation-semantics.md#3-design-decision-distinct-creation-by-default-idempotent-creation-by-key) on 2026-11-13. **Idempotent creation is not implemented, and no idempotency tests exist.**
 - **Legacy reference:** [Case creation semantics](../case-creation-semantics.md), section 3
 - **Related requirements:** FR-01, FR-11; rules "Retries" and "Concurrency"; quality requirement "Correctness" ([requirements](../requirements.md))

@@ -1,7 +1,7 @@
 # ADR-0002: AI Suggestions Are Non-Authoritative
 
 - **Status:** Accepted
-- **Recorded:** 2026-11-14
+- **Recorded:** 2026-11-12
 - **Decision provenance:** Retrospective reconstruction. This ADR formalizes the earlier note [DEC-002](../architecture-context.md#dec-002--the-ai-component-produces-suggestions-not-business-actions), "The AI component produces suggestions, not business actions", first committed on 2026-11-11. The options below were reconstructed for transparent comparison; they were not formally evaluated when the decision was made.
 - **Legacy reference:** DEC-002
 - **Related requirements:** FR-04, FR-05, FR-06, FR-08; rules "Source of truth", "Human authorization", and "Graceful AI failure" ([requirements](../requirements.md))

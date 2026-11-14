@@ -1,7 +1,7 @@
 # ADR-0003: Application-Controlled Case State Transitions
 
 - **Status:** Accepted
-- **Recorded:** 2026-11-14
+- **Recorded:** 2026-11-13
 - **Decision provenance:** Retrospective reconstruction.
   - This ADR formalizes the earlier note [DEC-003](../architecture-context.md#dec-003--only-authorized-application-operations-can-change-case-state), "Only authorized application operations can change case state", first committed on 2026-11-11.
   - The transition policy, version checks, and status-event table were implemented on 2026-11-13.
