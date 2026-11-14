@@ -170,7 +170,7 @@ docker start eaiso-postgres
 
 Data persists in the Docker named volume `eaiso_pgdata`. A normal container stop does not delete it. **Do not remove the volume unless you intend to discard local data.**
 
-The SQL scripts establish and populate the relational model; they do **not** yet prove tenant authorization, lifecycle transition enforcement, or safe concurrent updates. Those controls will be added and verified separately.
+The SQL migrations establish the relational model and its structural constraints. They do not, by themselves, enforce the application-level transition policy or protect against every concurrent update. The local [case service](docs/case-operations.md) implements version-checked forward transitions and transactional event history, with [16 recorded passing tests](tests/case-operations-results.md). Authentication, tenant authorization, and reviewer approval remain unimplemented, and database clients with unrestricted write access can bypass the service.
 
 ## Local development: AI triage
 

@@ -29,7 +29,7 @@ The platform needs one authoritative store for customer organizations, service c
    - *Costs:* schema changes need versioned migrations. The database must be operated, backed up, and recovered. Query performance has to be measured as workloads grow.
 2. **Document database**
    - *Benefits:* a flexible case shape, and a case could be stored together with its history in one document.
-   - *Costs:* ownership rules and invariants that span records (organization, case, suggestion, event) move largely into application code. Multi-document transactions and constraints are less central to the model. Relational queries for reporting are harder.
+   - *Costs:* many document databases support multi-document transactions, but ownership rules and invariants that span records (organization, case, suggestion, event) would rely more on application code than on declarative foreign keys and constraints. Relational queries for reporting are harder. For this workload's relational shape, that means more application complexity for the same integrity guarantees.
 3. **Event store as the only authority (event sourcing)**
    - *Benefits:* complete temporal history by design, and state can be rebuilt by replay.
    - *Costs:* current state must be rebuilt through projections. That introduces projection lag, event-schema versioning, and replay-correctness work that the current scope does not need. It still requires a store with concurrency control.
@@ -44,7 +44,7 @@ Adopt PostgreSQL as the initial authoritative system of record, owned and access
 - The application reads and changes this data through defined business operations, not through model-generated commands. It is responsible for controlling which users and services may read or change a case. **This access control is part of the decision but was not implemented when this ADR was recorded.**
 - An analytical store, if one is introduced later, is a derived projection. It cannot authorize or replace a transactional update.
 
-PostgreSQL was chosen because foreign keys, constraints, and transactions directly express the ownership, validity, and consistency rules the requirements demand, with the least additional infrastructure.
+PostgreSQL was chosen because its relational model and integrity mechanisms (foreign keys, constraints, and transactions) directly express the ownership, validity, and consistency rules the requirements demand. It fits this workload with less additional application complexity and infrastructure than the alternatives.
 
 ## Risks and Consequences
 
