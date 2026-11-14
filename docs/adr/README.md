@@ -91,6 +91,7 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 | [ADR-0001](0001-postgresql-authoritative-case-store.md) | PostgreSQL as the Authoritative Case Store | Accepted | DEC-001 |
 | [ADR-0002](0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
 | [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
+| [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Proposed | [Case creation semantics](../case-creation-semantics.md) §3 |
 
 ## Future Architecture Decisions — Not Yet Recorded
 
