@@ -5,7 +5,7 @@
 
 ## 1. Purpose and scope
 
-This document defines the first relational model for service cases and AI-assisted triage. It follows the business requirements in [`requirements.md`](requirements.md) and the ownership decisions in [`architecture-context.md`](architecture-context.md).
+This document defines the first relational model for service cases and AI-assisted triage. It follows the business requirements in [`requirements.md`](requirements.md) and the ownership decisions in [`architecture-context.md`](architecture-context.md). The choice of PostgreSQL as the authoritative store is recorded in [ADR-0001](adr/0001-postgresql-authoritative-case-store.md), and service-controlled transitions in [ADR-0003](adr/0003-application-controlled-case-transitions.md). See the [ADR index](adr/README.md) for all decisions.
 
 The model has four entities:
 
@@ -164,7 +164,7 @@ flowchart LR
 
 The local case service ([`src/case_service.py`](../src/case_service.py)) enforces exactly this path as its initial development policy: each transition moves one step forward, and skipped, backward, no-op, and post-closure transitions are rejected. This is an intentionally narrow rule, not a complete business policy. Whether a resolved case can return to review, a closed case can reopen, or particular roles can close a case remains an open business decision.
 
-A database `CHECK` constraint can reject an unknown status, but it does not by itself enforce which status transitions are permitted. The transition policy is enforced in the case service, not by the database; a direct SQL update can still bypass it. Authorization checks on transitions are not yet implemented.
+A database `CHECK` constraint can reject an unknown status, but it does not by itself enforce which status transitions are permitted. The transition policy is enforced in the case service, not by the database ([ADR-0003](adr/0003-application-controlled-case-transitions.md)); a direct SQL update can still bypass it. Authorization checks on transitions are not yet implemented.
 
 ## 5. Integrity and ownership rules
 
@@ -208,7 +208,7 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 - Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.
 - Whether `description` may be absent for imported or partial cases.
 - Data retention, deletion, and organization offboarding rules.
-- How idempotent case creation is stored: an idempotency record scoped to the organization and operation, committed atomically with the new case. No title or description uniqueness constraint will be added. See [Case creation semantics](case-creation-semantics.md).
+- How idempotent case creation is stored: an idempotency record scoped to the organization and operation, committed atomically with the new case. No title or description uniqueness constraint will be added. See [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) and [Case creation semantics](case-creation-semantics.md).
 - Whether model execution evidence moves from evaluation files into a database record, and how case revisions are captured.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 

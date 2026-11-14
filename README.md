@@ -68,6 +68,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 
 - [Requirements](docs/requirements.md) — business problem, expected behavior, invariants, and acceptance checks.
 - [Architecture context](docs/architecture-context.md) — initial decisions on data ownership, the AI suggestion boundary, and authorized state changes.
+- [Architecture Decision Records](docs/adr/README.md) — numbered architectural decisions, alternatives, consequences, and reconsideration triggers.
 - [System context](docs/system-context.md) — C4 system context, technical boundaries, capability status, data flows, and trust boundaries.
 - [Data model](docs/data-model.md) — initial relational model for organizations, cases, and AI suggestions, with integrity rules and open decisions.
 - [Schema integrity validation](tests/schema-integrity-results.md) — test environment, reproduction steps, and observed results for the initial schema.

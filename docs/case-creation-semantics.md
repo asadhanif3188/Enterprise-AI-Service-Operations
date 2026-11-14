@@ -1,7 +1,8 @@
 # Case Creation Semantics
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** This document records current behavior and a proposed future contract. **Idempotent case creation is not implemented.** The contract below is a design decision for a future create-case API, not a current guarantee. No database-backed duplicate-creation or idempotency test has been executed.
+**Status:** This document records current behavior and a proposed future contract. **Idempotent case creation is not implemented.** The contract below is a proposed design decision for a future create-case API, not a current guarantee. No database-backed duplicate-creation or idempotency test has been executed.  
+**Decision record:** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) records this decision, the alternatives considered, and the tradeoffs. This document remains the detailed design reference for current behavior, contract rules, expected outcomes, open decisions, and required validation.
 
 ## 1. The problem
 
@@ -52,7 +53,7 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 
 ## 3. Design decision: distinct creation by default, idempotent creation by key
 
-**Decision status:** Adopted as the design direction for a future create-case API. **Not implemented.**
+**Decision status:** Proposed in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) as the preferred design direction for a future create-case API. **Not implemented.**
 
 | # | Rule |
 |---|---|
@@ -104,17 +105,16 @@ A separate validation increment must test the implementation against a dedicated
 2. **Simultaneous same-key requests.** Concurrent requests with the same key produce exactly one case and one idempotency record.
 3. **Same key, different payload.** The second request is rejected as a conflict, and the first case is unchanged.
 4. **Distinct keys with identical case content.** Two distinct cases are created.
+5. **Cross-organization key isolation.** The same key value used by different organizations creates independent cases.
+6. **Rollback after failure.** After a simulated failure following the case insert, neither the case nor the idempotency record persists.
 
-Further cases worth covering include:
-
-- Requests without a key creating distinct cases.
-- The same key value used by different organizations.
-- A simulated failure after the case insert, after which neither the case nor the idempotency record persists.
+A further case worth covering is requests without a key, which must create distinct cases. The same list appears in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md#revisit-when).
 
 None of these tests exists yet. Until observed results are recorded, no document should claim that case creation is idempotent or duplicate-safe.
 
 ## 6. Related documents
 
+- [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md): the proposed decision and its tradeoffs.
 - [System context](system-context.md): current components, capability status, and trust boundaries.
 - [Controlled case operations](case-operations.md): the local case service and its limits.
 - [Data model](data-model.md): `case_record` attributes and integrity rules.

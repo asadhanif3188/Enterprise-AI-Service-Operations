@@ -135,7 +135,7 @@ These capabilities are required by the [requirements](requirements.md) or archit
 | Tenant (organization) authorization | FR-02, rule "Organization ownership" |
 | Reviewer approval bound to a specific suggestion version, and execution of approved updates | FR-06, FR-07, [DEC-003](architecture-context.md#dec-003--only-authorized-application-operations-can-change-case-state) |
 | A public or internal application API | Required before any of the above can be offered to users |
-| Idempotent case creation | Proposed contract in [Case creation semantics](case-creation-semantics.md) |
+| Idempotent case creation | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed); contract detailed in [Case creation semantics](case-creation-semantics.md) |
 | Complete, attributable case history (creation, edits, review decisions, failures) | FR-03, FR-09 |
 | Manual case-handling workflow when AI is unavailable | FR-08 |
 | Durable background processing with duplicate-safe retries | FR-11 |
@@ -179,7 +179,8 @@ These capabilities are required by the [requirements](requirements.md) or archit
 
 **Architecture and design**
 
-- [Architecture context](architecture-context.md): DEC-001 to DEC-003.
+- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0003 (Accepted) and ADR-0004 (Proposed), with alternatives, consequences, and revisit conditions.
+- [Architecture context](architecture-context.md): architecture overview, the original DEC-001 to DEC-003 notes, and the current implementation boundary.
 - [Requirements](requirements.md): functional requirements FR-01 to FR-15 and the rules that must always hold.
 - [Data model](data-model.md): entities, integrity rules, and deferred decisions.
 - [Controlled case operations](case-operations.md): transition policy and trust boundaries.
