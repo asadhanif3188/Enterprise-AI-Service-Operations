@@ -86,7 +86,11 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 
 ## Register
 
-No ADRs have been recorded yet.
+| ID | Title | Status | Legacy reference |
+|---|---|---|---|
+| [ADR-0001](0001-postgresql-authoritative-case-store.md) | PostgreSQL as the Authoritative Case Store | Accepted | DEC-001 |
+| [ADR-0002](0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
+| [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 
 ## Future Architecture Decisions — Not Yet Recorded
 
