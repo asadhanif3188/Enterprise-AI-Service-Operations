@@ -1,8 +1,10 @@
 # ADR-0006: Actor Affiliation and Role-Grant Eligibility
 
-- **Status:** Proposed, for architecture-owner review. **Not accepted, and not implemented.**
+- **Status:** Accepted (2026-11-15). The architecture owner approved the **design** after architectural review. Acceptance is not an implementation guarantee: nothing is implemented, and no test evidence exists.
 - **Recorded:** 2026-11-15
-- **Decision provenance:** Contemporary proposal. It follows the provider/customer distinction documented on 2026-11-15 in [Actor and Organization Membership, §10](../identity-model.md#10-provider-affiliation-vs-customer-access-grants). No implementation, test, or measured comparison supports it yet.
+- **Decision provenance:** Contemporary proposal. It follows the provider/customer distinction documented on 2026-11-15 in [Actor and Organization Membership, §10](../identity-model.md#10-provider-affiliation-vs-customer-access-grants).
+  - Proposed on 2026-11-15, then accepted the same day, with the choices listed under Revisit When.
+  - No implementation, test, or measured comparison supports it yet.
 - **Related requirements:** FR-01 and FR-02; rules "Organization ownership" and "Auditability"; quality requirement "Security" ([requirements](../requirements.md))
 - **Related decisions:**
   - [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) (Accepted): permissions and request-time enforcement.
@@ -43,7 +45,7 @@ The proposed `organization_membership` relation represents **access to a custome
 
 ## Decision
 
-**Proposed: adopt option 1 for the initial synthetic demonstration**, subject to architecture-owner approval before the identity migration.
+**Adopted: option 1 for the initial synthetic demonstration.** It governs the first identity migration.
 
 1. **Persist the business affiliation.** Extend the proposed `actor` entity with two server-managed attributes:
    - `affiliation_type`: `NOT NULL`, with `CHECK (affiliation_type IN ('provider', 'customer'))`;
@@ -108,20 +110,32 @@ The proposed `organization_membership` relation represents **access to a custome
   - Release row locks promptly, and never hold them across AI or network calls.
 - **Limited model.** A customer actor has one home customer, and providers cannot receive requester grants. Contractors, multiple affiliations, or service principals require an explicit redesign, not a misleading use of the current columns.
 - **Offboarding and audit.** Inactive grants may be kept without granting access, but the proposed membership table stores no complete history of grant changes. Reliable attribution and governance are future work, and this must not be called an audit trail.
-- **No implementation evidence.** This proposal changes no accepted ADR. Its invariant is not operative until it is implemented, exercised, and reviewed.
+- **Deadlocks are failures.** A membership update that bypasses the provisioning lock protocol may deadlock. PostgreSQL detects the deadlock and aborts one transaction, and that abort must be reported as a failed provisioning attempt, never as success.
+- **Restored or imported data.** Membership data that is restored or imported, for example from `pg_dump` output loaded before triggers exist, must have its eligibility integrity verified explicitly.
+- **No implementation evidence.** This decision changes no other ADR. Its invariant is not operative until it is implemented, exercised, and reviewed.
 
 ## Revisit When
 
-- **Before Accepted.** The architecture owner approves:
-  - the affiliation schema;
-  - the eligibility matrix, including the denial of provider requester grants;
-  - the controlled provisioning boundary;
-  - the treatment of inactive historical grants;
-  - the policy for changing an actor's affiliation;
-  - the database enforcement strategy, including the trigger-internal lock order noted in decision 5.
+**Accepted architectural choices (2026-11-15).** These change only through a superseding ADR:
 
-  The owner also confirms that this decision *complements*, and does not modify, the request-time contract in ADR-0005.
-- **Before identity and grant provisioning is enabled.** Implement and test:
+1. **Affiliation model.** Option B: `actor.affiliation_type` (`provider` or `customer`) and a nullable `actor.home_organization_id`, with the same-row consistency constraint.
+2. **Provider identity.** ABC is the implicit service provider, not a customer tenant in `organization`.
+3. **Access grants.** The table keeps the name `organization_membership`; its rows are access grants, not employment.
+4. **Role eligibility.**
+   - Provider actors may receive explicitly authorized `service_engineer` or `service_manager` grants.
+   - Customer actors may receive `requester` grants only in their home customer organization.
+   - Provider actors receive no requester grants in the initial model.
+5. **No implicit permissions.** Affiliation never creates a grant, and platform administrators have no automatic customer-case access.
+6. **Provisioning boundary.** A trusted, controlled provisioning path, with affiliation and grants managed by the server.
+7. **Database protection.** Membership-side and actor-side PostgreSQL eligibility guards, together with the actor's same-row affiliation constraint.
+8. **Inactive grants.** They may remain as historical records, and must be revalidated before reactivation.
+9. **Affiliation changes.** A change that would leave incompatible active grants is rejected; those grants are reconciled or deactivated first.
+10. **Concurrency.** Provisioning transactions lock the actor first, then the affected membership rows in a deterministic order. The membership guard also locks the actor with sufficient strength; `FOR KEY SHARE` alone is not enough.
+11. **Compatibility.** ADR-0005's request-time authorization policy and ADR-0004's idempotency scope are preserved. No new request-time permission predicate is added; this decision *complements* ADR-0005 and does not modify it.
+
+These are approved as **architecture, not implementation guarantees**.
+
+- **Before identity and grant provisioning is enabled.** Verify trigger execution order and row-lock behavior with PostgreSQL-backed tests. Implement and test:
   - same-row constraints;
   - the membership-side and actor-side guards;
   - unauthorized cross-customer grants and customer-to-engineer grants;
@@ -130,10 +144,12 @@ The proposed `organization_membership` relation represents **access to a custome
   - denial of provider requester grants;
   - actor affiliation changes;
   - concurrent actor and grant updates under controlled locks;
-  - direct writes through the intended non-owner database role.
+  - direct writes through the intended non-owner database role;
+  - deadlock handling, where an aborted transaction is reported as a failure;
+  - integrity verification of restored or imported membership data.
 
-  Record positive and negative results and the database state. A trigger definition or a documentation checklist is not passing evidence.
-- **Before a customer-facing or production deployment.** Design:
+  Record positive and negative results and the database state. A trigger definition or a documentation checklist is not passing evidence, and no race freedom is claimed until the concurrency tests pass.
+- **Before a customer-facing or production deployment.** Design the items below. A value of `provider` in the field is not, by itself, trustworthy evidence of affiliation, and direct privileged access or disabled triggers can bypass the guards.
   - secure proof of actor affiliation, and authorization for provisioning;
   - least-privilege database credentials;
   - a verified history of grant changes;

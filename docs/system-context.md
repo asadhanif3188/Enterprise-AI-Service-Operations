@@ -179,7 +179,7 @@ These capabilities are required by the [requirements](requirements.md) or archit
 
 **Architecture and design**
 
-- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0005 (all Accepted; ADR-0004 and ADR-0005 are designs that are not yet implemented) and ADR-0006 (Proposed), with alternatives, consequences, and revisit conditions.
+- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0006 (all Accepted; ADR-0004, ADR-0005, and ADR-0006 are designs that are not yet implemented), with alternatives, consequences, and revisit conditions.
 - [Architecture context](architecture-context.md): architecture overview, the original DEC-001 to DEC-003 notes, and the current implementation boundary.
 - [Requirements](requirements.md): functional requirements FR-01 to FR-15 and the rules that must always hold.
 - [Data model](data-model.md): entities, integrity rules, and deferred decisions.

@@ -93,14 +93,14 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 | [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 | [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (2026-11-15; design, not implemented) | [Case creation semantics](../case-creation-semantics.md) §3 |
 | [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Accepted (2026-11-15; design, not implemented) | — |
-| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Proposed | — |
+| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (2026-11-15; design, not implemented) | — |
 
 ## Future Architecture Decisions — Not Yet Recorded
 
 These topics are expected to need decisions as the project grows. They are backlog items, not accepted decisions, and have no ADR numbers yet.
 
 - A production identity provider and credential lifecycle, beyond the local test credentials accepted in [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md).
-- Actor affiliation and role-grant eligibility: now recorded in [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md), which is **Proposed** and not accepted. Support for contractors, multiple affiliations, and service principals remains a future decision.
+- Support for contractors, multiple affiliations, and service principals. Single-affiliation provider/customer eligibility is accepted in [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md).
 - PostgreSQL row-level security as defense in depth.
 - Human-review approval binding to a specific suggestion and case version.
 - Production retention and expiry of idempotency records. Replay rules and local-demonstration retention are accepted in [ADR-0004](0004-keyed-idempotent-case-creation.md).
