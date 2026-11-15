@@ -49,7 +49,7 @@ It must not add identity, role, or organization-name columns to `case_record` me
 | `case_status_event` | **Implemented** ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)), unchanged by this design | `id UUID`; `case_id` FK | Status-transition history with a caller-supplied `actor_label` |
 | `actor` | **Proposed, not implemented** | `id UUID` | Stable internal reference to an application principal; not a credential |
 | `organization_membership` | **Proposed, not implemented** | Composite `(actor_id, organization_id)` | One actor's role and active state in one organization |
-| `case_creation_idempotency` | Proposed in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md); out of scope here | — | Keyed create-request replay detection |
+| `case_creation_idempotency` | Accepted design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), not implemented; out of scope here | — | Keyed create-request replay detection |
 
 `case_status_event.actor_label` is unverified text. Adding an `actor` table does **not** make existing or future labels verified attribution. Linking events to `actor.id` is an open decision (section 10).
 

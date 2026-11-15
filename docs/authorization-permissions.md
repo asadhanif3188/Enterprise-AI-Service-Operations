@@ -13,7 +13,7 @@
 - **Governing decisions:**
   - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) require application-controlled access but do not implement it.
   - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md) means AI output never authorizes anything.
-  - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) scopes idempotency keys to the *authorized* organization.
+  - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted design, not implemented) scopes idempotency keys to the *authorized* organization and the *verified* actor.
 
 This document defines **which** decisions the policy must make. It deliberately does not repeat the entity design or the endpoint contract.
 
@@ -163,7 +163,7 @@ None of these is resolved by this document.
 
 - **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. Options are listed in [identity model §7](identity-model.md#7-illustrative-membership-lookup); the choice is still open.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
-- **Idempotent replay for requesters.** The revised [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) addresses this, but nothing is accepted or implemented:
+- **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design, but nothing is implemented, and requester create-only itself is still only proposed:
   - every retry is authorized for `case:create` **before** any key lookup;
   - keys are scoped to `(authorized organization_id, verified actor_id, 'case:create', key)`, so another member's key is an independent operation;
   - a replay returns only `id` and `organization_id`, never the case's current state.

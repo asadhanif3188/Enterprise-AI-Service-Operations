@@ -23,7 +23,7 @@ The platform needs one consistent security boundary for case creation, single-ca
   - `transition_case()` stays unexposed ([ADR-0003](0003-application-controlled-case-transitions.md)).
 - **Proposed model:** a stable `actor.id`, one role per `(actor_id, organization_id)` membership, and only the permissions `case:create`, `case:read`, and `case:list`.
 - **IDs are not credentials.** Client-supplied case and organization UUIDs are selectors, never credentials. Local demonstration credentials must not be published, and must not be mistaken for OIDC or SSO.
-- **Idempotency dependency.** [ADR-0004](0004-keyed-idempotent-case-creation.md) is Proposed. Its key scope depends on the verified actor and authorized organization that this ADR defines.
+- **Idempotency dependency.** [ADR-0004](0004-keyed-idempotent-case-creation.md) is Accepted as design, but not implemented. Its key scope depends on the verified actor and authorized organization that this ADR defines.
 
 ## Options Considered
 
@@ -63,7 +63,7 @@ The platform needs one consistent security boundary for case creation, single-ca
   - **No revocation guarantee or lock order is accepted.**
   - Decisions are not cached across requests in the first version.
 - **Fail closed.** If the credential cannot be verified, the policy lookup fails, or the database is unavailable, no protected operation starts. Once a write has begun, a failure can leave the commit outcome unknown, and no automatic rollback is claimed.
-- **Idempotency coupling.** The layer authorizes the verified actor **before** any idempotency-key lookup, and it supplies the `(authorized organization_id, verified actor_id)` pair that scopes the keys proposed in ADR-0004. A replay returns only immutable identity, never current case state.
+- **Idempotency coupling.** The layer authorizes the verified actor **before** any idempotency-key lookup, and it supplies the `(authorized organization_id, verified actor_id)` pair that scopes the keys accepted in ADR-0004. A replay returns only immutable identity, never current case state.
 
   Keyed creation stays **disabled** until both ADRs are Accepted, their contracts are aligned, and isolation and concurrency tests have been executed.
 
@@ -88,5 +88,5 @@ Detailed behavior and the proposed test vectors are in the [request sequence](..
   - decide the requester create-only policy;
   - confirm compatibility with ADR-0004's actor-scoped keys and identity-only replay.
 - **Before the API is exposed.** Implement and execute tenant-authorization tests, positive and negative. They must cover spoofed headers, wrong-organization create, read, and list, disabled memberships, mixed roles, and failure paths. Add the structural no-bypass check, and record the results separately.
-- **Before keyed creation.** Accept ADR-0004, and execute its cross-actor, revocation, concurrency, and isolation tests.
+- **Before keyed creation.** ADR-0004 is already accepted as design. Implement it, and execute its cross-actor, revocation, concurrency, header-parsing, canonicalization, and isolation tests.
 - **When new data paths appear.** Revisit when background workers, direct database writers, privileged support operations, or service-to-service calls are introduced, and when optional row-level security or a least-privilege database role is considered.

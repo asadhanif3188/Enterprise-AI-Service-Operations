@@ -14,7 +14,7 @@ This contract must conform to the following [Architecture Decision Records](adr/
 | [ADR-0001: PostgreSQL as the Authoritative Case Store](adr/0001-postgresql-authoritative-case-store.md) | Accepted | Case creation and retrieval operate against PostgreSQL as the authoritative store. API responses report the case state recorded there. |
 | [ADR-0002: AI Suggestions Are Non-Authoritative](adr/0002-ai-suggestions-non-authoritative.md) | Accepted | `POST /cases` creates a case without requiring AI inference. AI output cannot authorize a request or change case state. |
 | [ADR-0003: Application-Controlled Case State Transitions](adr/0003-application-controlled-case-transitions.md) | Accepted | The existing `transition_case()` function must not be exposed through an HTTP endpoint until authentication, tenant authorization, and approval checks exist. The service currently performs none of these checks. |
-| [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md) | **Proposed** | The retry contract for `POST /cases` ([section 5](#5-post-cases--create-a-case-planned)) follows the ADR's revised proposal: keys scoped to the authorized organization and the verified actor, and an identity-only replay. It is **Proposed and not implemented**. No part of this contract may claim that case creation is idempotent or duplicate-safe until the tests listed in the ADR have recorded observed results. |
+| [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md) | **Accepted** (2026-11-15; design only) | The retry contract for `POST /cases` ([section 5](#5-post-cases--create-a-case-planned)) follows the accepted design: keys scoped to the authorized organization and the verified actor, an identity-only `200` replay, and `422` for a payload mismatch. It is **not implemented**, depends on ADR-0005 (Proposed), and keyed creation stays disabled. No part of this contract may claim that case creation is idempotent or duplicate-safe until the tests listed in the ADR have recorded observed results. |
 | [ADR-0005: Server-Verified Identity and Organization-Scoped Case Authorization](adr/0005-server-verified-identity-and-tenant-authorization.md) | **Proposed** | Identity, authorization, and denial outcomes in [section 4](#4-trust-boundary-sequence) follow this proposal. It is **not implemented**, and no tenant-isolation claim may be made until its tests have recorded observed results. |
 
 **Accepted does not mean implemented.** ADR-0001 to ADR-0003 include requirements, such as access control and authorization, that the current code does not meet. See the [system context](system-context.md#4-capability-status) for current capability status.
@@ -40,7 +40,7 @@ The planned HTTP layer must not expose these functions directly without a verifi
 | Tenant selection | The client supplies a target `organization_id` for create and list. It is **not** proof of ownership; the server verifies membership and operation permission | Supports users who belong to several organizations, without trusting tenant IDs as credentials |
 | Authorization | Deny by default unless the actor is active, has an applicable organization membership, and has a role that allows the action | Foreign keys and query predicates alone do not prove access rights |
 | Case creation | `POST /cases` writes a case at `NEW`, version `1`, without invoking AI | An accepted case survives a separate AI outage ([ADR-0002](adr/0002-ai-suggestions-non-authoritative.md)) |
-| Idempotency | Optional `Idempotency-Key` header; authorization first, then keyed creation, atomic per `(authorized organization_id, verified actor_id, 'case:create', key)` | Prevents unintended duplicate cases after ambiguous response failures ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Proposed) |
+| Idempotency | Optional `Idempotency-Key` header; authorization first, then keyed creation, atomic per `(authorized organization_id, verified actor_id, 'case:create', key)` | Prevents unintended duplicate cases after ambiguous response failures ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Accepted design, not implemented) |
 | Read single case | `GET /cases/{id}` checks the case's actual owner against the trusted actor's membership | A guessed UUID must not bypass the tenant boundary |
 | List cases | `GET /cases?organization_id=<uuid>&limit=...&cursor=...`; authorization is applied before the scoped query | No implicit all-tenant listing |
 | Case status changes | Out of scope for this contract; `transition_case` is not exposed as an unprotected endpoint | The transition service has no verified actor or approval ([ADR-0003](adr/0003-application-controlled-case-transitions.md)) |
@@ -85,14 +85,14 @@ Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case
 ## 5. `POST /cases` — create a case (PLANNED)
 
 **Authorization:** a trusted actor with `case:create` in the intended organization.  
-**Headers:** `Authorization: Bearer <test-token>`; `Content-Type: application/json`; optional `Idempotency-Key: <client-generated-key>`.
+**Headers:** `Authorization: Bearer <test-token>`; `Content-Type: application/json`; optional `Idempotency-Key: "<client-generated-key>"` (an RFC 9651 String, so quoted on the wire).
 
 **Example request (synthetic UUIDs):**
 
 ```http
 POST /cases HTTP/1.1
 Authorization: Bearer <test-token>
-Idempotency-Key: synthetic-case-create-001
+Idempotency-Key: "synthetic-case-create-001"
 Content-Type: application/json
 
 {
@@ -123,20 +123,28 @@ Content-Type: application/json
 }
 ```
 
-### Retry contract (Proposed in ADR-0004, not implemented)
+### Retry contract (Accepted in ADR-0004; not implemented)
 
-The current `create_case()` inserts a new case on every successful call. The rules below describe the proposed contract; see [Case creation semantics](case-creation-semantics.md#expected-outcomes) for the full outcomes table.
+The current `create_case()` inserts a new case on every successful call and remains non-idempotent. The rules below are the **accepted architecture** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)). They depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed), and keyed creation stays disabled until both are implemented and tested. See [Case creation semantics](case-creation-semantics.md#expected-outcomes) for the full outcomes table.
 
-- **Authorization first.** Every keyed request, including a replay, is authenticated and authorized for `case:create` **before** any key lookup. A denied request gets `401` or `403` and learns nothing about stored keys.
-- **Scope.** `(authorized organization_id, verified actor_id, 'case:create', exact key)`. The same literal key used by a different actor, or in a different organization, is an independent operation. It neither replays nor conflicts.
-- **Replay.** A request with the same scope and an equivalent payload inserts nothing.
-- **Conflict.** A request with the same scope and a different payload gets `409 Conflict`, with no new case, no mutation, and no detail of the first request.
-- **Concurrency.** Concurrent requests in the same scope produce at most one case. A database uniqueness constraint within the creating transaction enforces this, not a `SELECT` followed by an unprotected `INSERT`. If a bounded wait cannot establish the outcome, the response is `503 Service Unavailable`, and the client may retry with the same key.
+- **Authorization first.** Every keyed request, including a replay, is authenticated and authorized for `case:create` **before** any key lookup. A denied or revoked actor gets `401` or `403` and cannot retrieve any stored idempotency result.
+- **Scope.** `(authorized organization_id, verified actor_id, 'case:create', exact idempotency_key)`. The same key used by another actor in the same organization, or by the same actor in another organization, is an independent operation.
+- **Header syntax.**
+  - `Idempotency-Key` is an [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651#section-3.3.3) Item whose value must be a String, per the IETF draft. It is sent quoted, as in `Idempotency-Key: "synthetic-case-create-001"`.
+  - The **decoded** value must match case-sensitive `[A-Za-z0-9._~-]{16,128}`.
+  - Parameters are ignored.
+  - A parse failure, a non-String item (for example, an unquoted value), or a pattern mismatch gets `400`. The field is never silently ignored.
+  - Clients should use high-entropy values such as UUIDv4. Raw keys are never logged.
+- **Replay.** The same scope with an equal request fingerprint inserts nothing and returns `200 OK` with identity only (see below).
+- **Payload mismatch.** The same scope with a different fingerprint gets `422 Unprocessable Content` with error code `idempotency_payload_mismatch`. There is no new case, no mutation, and no detail of the earlier request. The fingerprint is defined in [Case creation semantics, rule 10](case-creation-semantics.md#3-design-decision-distinct-creation-by-default-idempotent-creation-by-key): RFC 8785 and SHA-256, with duplicate and unknown properties rejected.
+- **Concurrency.** Concurrent requests in the same scope produce at most one case. A database uniqueness constraint within the creating transaction enforces this, not a `SELECT` followed by an unprotected `INSERT`.
+  - A waiting request waits for a bounded, configurable time.
+  - If the outcome is still unresolved, it gets `503 Service Unavailable`. `Retry-After` may be omitted in the local demonstration.
+  - A timeout proves neither success nor failure; retry with the same key.
 - **Rollback.** If the first transaction rolls back, a retry may create the case once.
 - **No key.** Separate successful requests without a key, including requests with identical text, create distinct cases.
-- **Key format.** Case-sensitive `[A-Za-z0-9._~-]{16,128}`; anything else gets `400`. A high-entropy value such as a UUIDv4 is recommended. Unpredictability is not access control.
 
-**Proposed replay response.** This differs from the `201` creation response by design:
+**Replay response.** This differs from the `201` creation response by design:
 
 ```http
 HTTP/1.1 200 OK
@@ -152,15 +160,21 @@ Content-Type: application/json
 
 The replay body carries only immutable creation identity, taken from the idempotency record. It never includes the case's current `status`, text, or `version`, so a create-only requester gains no `case:read` ability through replays.
 
-**Still open before ADR-0004 is accepted:**
+**Payload-mismatch response** (illustrative):
 
-- the status-code choices, which differ from the IETF Idempotency-Key draft;
-- the bounded-wait value, and whether to send `Retry-After`;
-- confirmation of the exact fingerprint serialization;
-- production retention;
-- whether keys become mandatory for some clients.
+```http
+HTTP/1.1 422 Unprocessable Content
+Content-Type: application/json
 
-See [Case creation semantics, section 4](case-creation-semantics.md#4-open-implementation-decisions). Clients must not rely on any of this until ADR-0004 is Accepted and keyed creation has been implemented and tested.
+{
+  "error": {
+    "code": "idempotency_payload_mismatch",
+    "message": "Idempotency key was already used with a different request"
+  }
+}
+```
+
+**Left to implementation** (no new ADR needed): the bounded-wait value, and whether to send `Retry-After`. **Separate decisions:** production retention, and whether keys become mandatory for some clients. See [Case creation semantics, section 4](case-creation-semantics.md#4-remaining-implementation-decisions). Clients must not rely on any of this until keyed creation has been implemented and tested.
 
 ## 6. `GET /cases/{id}` — fetch one case (PLANNED)
 
@@ -219,14 +233,14 @@ All error responses use a consistent envelope, for example:
 
 | HTTP status | Situation | Disclosure rule |
 |---|---|---|
-| `400 Bad Request` | Malformed JSON, malformed idempotency key, or invalid parameter syntax | No internal details |
+| `400 Bad Request` | Malformed JSON; an `Idempotency-Key` that fails RFC 9651 String parsing, is not a String, or fails the key pattern; invalid parameter syntax | No internal details; the raw key is not echoed or logged |
 | `401 Unauthorized` | Missing, expired, or invalid credential | No other user or organization header is trusted as a fallback |
 | `403 Forbidden` | A valid actor explicitly requests an organization where they lack the required membership or permission (create or list) | No case records returned |
 | `404 Not Found` | A single-case lookup is missing or outside the actor's authorized scope | Does not disclose whether a foreign case exists |
-| `409 Conflict` | Proposed status when the same actor reuses an idempotency key in the same organization with a different payload (see [section 5](#5-post-cases--create-a-case-planned)); a **future** stale-write conflict | No unintended database mutation; no detail of the earlier request |
-| `422 Unprocessable Content` | Well-formed JSON with missing, blank, or invalid business fields, or disallowed attributes | Field-level messages may be returned, without personal data |
+| `409 Conflict` | Reserved for a **future** stale-write conflict. It is not used for idempotency. | No unintended database mutation |
+| `422 Unprocessable Content` | Well-formed JSON with missing, blank, or invalid business fields, or disallowed attributes. Separately, error code `idempotency_payload_mismatch` when the same actor reuses an idempotency key in the same organization with a different request fingerprint (see [section 5](#5-post-cases--create-a-case-planned)). | Field-level messages may be returned for validation errors, without personal data. A payload mismatch returns no detail of the earlier request. |
 | `500 Internal Server Error` | Unexpected internal failure | Safe, generic response with a correlation ID; no SQL or secrets exposed |
-| `503 Service Unavailable` | Proposed for a keyed create whose outcome cannot be established within a bounded wait, while a concurrent request with the same scope is in flight | Claims neither success nor rollback; no case data; safe to retry with the same key |
+| `503 Service Unavailable` | A keyed create whose outcome cannot be established within a bounded, configurable wait, while a concurrent request with the same scope is in flight (accepted design; not implemented) | Claims neither success nor rollback; no case data; safe to retry with the same key |
 
 A server-generated correlation or request ID is used in logs and may be returned in a response header. It is **observability identity**, not the case ID or the idempotency key. A client-supplied request ID never grants authority.
 
@@ -243,7 +257,7 @@ A server-generated correlation or request ID is used in logs and may be returned
 
 - `actor(id, ...)` represents a server-verified application principal, or an internal mapping to an identity system.
 - `organization_membership(actor_id FK, organization_id FK, role, active, ...)` associates an actor with an organization, instead of a single `actor.organization_id` or a comma-delimited list. For a single role per membership, uniqueness is enforced on `(actor_id, organization_id)`. Multiple role assignments would need a deliberately different key or schema.
-- `case_creation_idempotency(organization_id, actor_id, operation, idempotency_key, request_fingerprint, case_id, ...)` is **proposed only** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)), with a unique `(organization_id, actor_id, operation, idempotency_key)` constraint and atomic creation. It identifies a repeated *request*, not a repeated *incident description*.
+- `case_creation_idempotency(organization_id, actor_id, operation, idempotency_key, fingerprint_version, request_fingerprint, case_id, ...)` is part of the **accepted design but is not created** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)). It has a unique `(organization_id, actor_id, operation, idempotency_key)` constraint and atomic creation. It identifies a repeated *request*, not a repeated *incident description*.
 
 **Functional dependency and anomaly example.** If an actor belongs to several organizations, a single `organization_id` on the actor row loses legitimate memberships. A comma-separated list makes it hard to enforce foreign keys and to revoke one membership safely. A membership relation captures the many-to-many association and the role that applies in each organization. Organization names and actor roles are not duplicated into `case_record` rows, because those values change independently of the case.
 
@@ -281,7 +295,8 @@ No `case_record(organization_id, created_at, id)` index is added yet. The next m
 | Org B actor lists Org A cases | `403`; no case rows | NOT IMPLEMENTED |
 | Forged `X-Org-Id` or `X-User-Id` | Cannot change the resolved principal, memberships, or scope | NOT IMPLEMENTED |
 | Same actor, organization, key, and payload submitted twice | One case; `201`, then a `200` replay with identity only | NOT IMPLEMENTED |
-| Same actor, organization, and key with a changed payload | `409`; no second case | NOT IMPLEMENTED |
+| Same actor, organization, and key with a changed payload | `422` `idempotency_payload_mismatch`; no second case | NOT IMPLEMENTED |
+| Unquoted, non-String, or out-of-pattern `Idempotency-Key` | `400`; no case; not treated as an unkeyed request | NOT IMPLEMENTED |
 | Two concurrent creates in the same scope | At most one case; the later request replays, conflicts, or gets `503` | NOT IMPLEMENTED |
 | Two actors in one organization use the same key, with the same and with a changed payload | Independent operations; two cases; no replay, no conflict | NOT IMPLEMENTED |
 | Requester replays after the case was changed | Replay body contains only `id` and `organization_id`; no current state | NOT IMPLEMENTED |
@@ -297,7 +312,7 @@ Database-mutating tests use the dedicated `eaiso_test` database. The existing ca
 
 1. Server-controlled test identities and membership rules, with their migration and seed data.
 2. Authenticated `GET /cases/{id}` and the scoped `GET /cases` list.
-3. `POST /cases`, first with distinct-creation semantics; keyed idempotent creation only after ADR-0004 and ADR-0005 are Accepted and their tests have been executed.
+3. `POST /cases`, first with distinct-creation semantics; keyed idempotent creation only after ADR-0005 is also Accepted, both are implemented, and their tests have passed.
 4. HTTP integration tests against `eaiso_test`.
 5. Query-plan captures before any new index.
 

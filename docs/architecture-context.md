@@ -14,7 +14,7 @@ Decisions are recorded as numbered ADRs. The [ADR index](adr/README.md) explains
 | [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) | PostgreSQL as the Authoritative Case Store | Accepted | DEC-001 |
 | [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
 | [ADR-0003](adr/0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
-| [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Proposed | [Case creation semantics](case-creation-semantics.md) §3 |
+| [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (design; not implemented) | [Case creation semantics](case-creation-semantics.md) §3 |
 | [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Proposed | — |
 
 **Accepted does not mean implemented.** An Accepted ADR records an adopted direction. Several of these decisions include requirements, such as authorization and approval checks, that the current code does not meet. See [Current boundary](#current-boundary).
@@ -78,7 +78,7 @@ A local [case service](case-operations.md) ([`src/case_service.py`](../src/case_
 
 - **No authorization check.** The organization ID it receives filters queries but is supplied by the caller, and the recorded `actor_label` is not a verified identity or approval.
 - **Partial history.** The event table records status transitions made through the service only. It is not a complete or tamper-proof audit trail, and database clients with write access can bypass the service.
-- **No idempotent creation.** Each successful `create_case` call inserts a new case. The proposed idempotency-key contract is recorded in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) and detailed in [Case creation semantics](case-creation-semantics.md).
+- **No idempotent creation.** Each successful `create_case` call inserts a new case. The idempotency-key contract is accepted as design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), but not implemented, and is detailed in [Case creation semantics](case-creation-semantics.md).
 
 ## Current boundary
 

@@ -208,7 +208,7 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 - Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.
 - Whether `description` may be absent for imported or partial cases.
 - Data retention, deletion, and organization offboarding rules.
-- How idempotent case creation is stored. The proposal is an idempotency record scoped to the authorized organization, the verified actor, and the operation, committed atomically with the new case. No title or description uniqueness constraint will be added. See [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) and [Case creation semantics](case-creation-semantics.md).
+- How idempotent case creation is stored. The accepted design is an idempotency record scoped to the authorized organization, the verified actor, and the operation, holding a versioned request fingerprint and committed atomically with the new case. No migration exists yet. No title or description uniqueness constraint will be added. See [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted; not implemented) and [Case creation semantics](case-creation-semantics.md).
 - Whether model execution evidence moves from evaluation files into a database record, and how case revisions are captured.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
