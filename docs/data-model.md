@@ -202,7 +202,7 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 
 ## 7. Deferred decisions
 
-- User identities, roles, engineer assignment, and how users are associated with organizations.
+- User identities, roles, engineer assignment, and how users are associated with organizations. The proposed actor model, including the distinction between provider affiliation and customer access grants, is in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants). It is not implemented.
 - Full transition rules, including reopening and who may resolve or close cases.
 - Approval records and a complete case history covering creation, content edits, and review decisions; both are required before claiming a complete reviewed workflow. The current status-transition events are only part of that history.
 - Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.

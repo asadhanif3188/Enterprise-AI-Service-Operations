@@ -10,7 +10,7 @@ This document describes the problem the project addresses and the behavior the a
 
 ## 1. Business problem
 
-A service provider handles IT support requests for several customer organizations. An engineer receiving a new case needs to understand the issue, assess its urgency, consult relevant procedures or previous cases, and decide what to do next. The engineer also needs to record the decision and keep the case updated.
+A service provider (in this scenario, the fictional ABC Company) handles IT support requests for several customer organizations. An engineer receiving a new case needs to understand the issue, assess its urgency, consult relevant procedures or previous cases, and decide what to do next. The engineer also needs to record the decision and keep the case updated.
 
 Much of this work can be repetitive. Information may be spread across case histories and technical documents, and different engineers may arrive at different classifications or next steps. Managers also need a dependable view of case volume, backlog, response times, and recurring problems.
 
@@ -41,6 +41,13 @@ These are objectives to test. No reduction in handling time, improvement in accu
 | Platform administrator | Manage permitted access and investigate operational failures. |
 
 An authenticated user's access must be determined by their role **and** the customer organizations or cases they are authorized to work with. Exact permission rules will be specified before the affected endpoints are implemented.
+
+The platform serves several customer organizations:
+
+- **Requesters** are staff of a customer organization.
+- **Service engineers, service managers, and platform administrators** are staff of the service provider.
+
+A provider employee does not become an employee of the customers they support. Whether they may work on a customer's cases depends on being authorized for that customer. A person's organizational affiliation is not, by itself, an access right. How affiliation and customer access are modeled is a proposed design in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants).
 
 ## 4. Core workflow
 

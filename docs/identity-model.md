@@ -54,7 +54,7 @@ It must not add identity, role, or organization-name columns to `case_record` me
 | `organization_membership` | **Proposed, not implemented** | Composite `(actor_id, organization_id)` | One actor's role and active state in one organization |
 | `case_creation_idempotency` | Accepted design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), not implemented; out of scope here | — | Keyed create-request replay detection |
 
-`case_status_event.actor_label` is unverified text. Adding an `actor` table does **not** make existing or future labels verified attribution. Linking events to `actor.id` is an open decision (section 10).
+`case_status_event.actor_label` is unverified text. Adding an `actor` table does **not** make existing or future labels verified attribution. Linking events to `actor.id` is an open decision (section 11).
 
 ### Entity relationship diagram
 
@@ -97,6 +97,8 @@ erDiagram
     }
 ```
 
+The proposed affiliation refinement (`affiliation_type`, `home_organization_id`) is not shown here. See [section 10](#10-provider-affiliation-vs-customer-access-grants).
+
 There is deliberately **no** relationship between `actor` and `case_record`. The model does not record case assignment or requester ownership. It also does not imply that every member may read every case in an organization. Assignment and requester-owned access are separate future relationships.
 
 ## 3. Proposed `actor`
@@ -115,9 +117,11 @@ There is deliberately **no** relationship between `actor` and `case_record`. The
 - It is not bound to any credential.
 - It may change without changing who the actor is.
 
+**Affiliation.** Two further attributes, `affiliation_type` and `home_organization_id`, are proposed separately in [section 10](#10-provider-affiliation-vs-customer-access-grants), pending architecture-owner approval. They are not authorization inputs.
+
 Matching a request to an actor by display name, or accepting a display name from a header, would let any caller claim to be anyone. Policy code should therefore never read `display_name`; it is for display only.
 
-**What `actor` does not store.** The table holds no credentials, password hashes, tokens, email addresses, or external identity-provider subjects. The [API contract](api-contract.md#3-api-design-choices-proposed) proposes mapping a locally configured opaque test credential to an `actor.id` through server-controlled configuration that clients cannot edit. Working credentials must not be committed. Production login, token storage and rotation, identity-provider subjects, and service-to-service principals are open decisions (section 10).
+**What `actor` does not store.** The table holds no credentials, password hashes, tokens, email addresses, or external identity-provider subjects. The [API contract](api-contract.md#3-api-design-choices-proposed) proposes mapping a locally configured opaque test credential to an `actor.id` through server-controlled configuration that clients cannot edit. Working credentials must not be committed. Production login, token storage and rotation, identity-provider subjects, and service-to-service principals are open decisions (section 11).
 
 ## 4. Proposed `organization_membership`
 
@@ -128,6 +132,8 @@ Matching a request to an actor by display name, or accepting a display name from
 | `role` | `text` | `NOT NULL`, `CHECK (role IN ('service_engineer', 'service_manager', 'requester'))` | The **single** role this actor holds in this organization. Uses the API contract's vocabulary. |
 | `is_active` | `boolean` | `NOT NULL DEFAULT TRUE` | An inactive membership grants nothing. |
 | `created_at` | `timestamptz` | `NOT NULL DEFAULT NOW()` | When the membership row was created. |
+
+**A membership is a customer access grant, not employment.** An ABC engineer can hold grants for several customers without being employed by any of them ([section 10](#10-provider-affiliation-vs-customer-access-grants)).
 
 **Primary key `(actor_id, organization_id)`.** The design assumes **one membership row and one role per actor per organization**. Under that assumption the pair identifies the relationship, and `role` depends on the whole pair (section 5). The key also prevents duplicate or contradictory rows: an actor cannot be both an active `requester` and an inactive `service_manager` in the same organization. If one actor ever needs several roles in one organization, this key is wrong. The schema would then need `(actor_id, organization_id, role)` as the key, or a separate membership-role relation with its own active state. That would be a deliberate schema change, not a data workaround.
 
@@ -153,6 +159,8 @@ Matching a request to an actor by display name, or accepting a display name from
 | `case_record` (existing) | `id → organization_id, title, description, status, version, created_at, updated_at` | No actor or role attributes. |
 | `actor` (proposed) | `id → display_name, is_active, created_at` | `display_name` determines nothing. |
 | `organization_membership` (proposed) | `(actor_id, organization_id) → role, is_active, created_at` | Neither `actor_id` alone nor `organization_id` alone determines `role`. |
+
+If the affiliation attributes proposed in [section 10](#10-provider-affiliation-vs-customer-access-grants) are approved, `actor.id → affiliation_type, home_organization_id` is added.
 
 In each relation, every non-trivial determinant is a key, so the proposed relations are in Boyce–Codd normal form under these dependencies.
 
@@ -261,8 +269,170 @@ Every rule is scoped to one organization. Membership in organization A grants no
 
 References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatype-uuid.html), [UUID functions](https://www.postgresql.org/docs/16/functions-uuid.html), and [constraints](https://www.postgresql.org/docs/16/ddl-constraints.html).
 
-## 10. Open decisions
+## 10. Provider Affiliation vs Customer Access Grants
 
+**Status:** **Proposed refinement for architecture-owner review. Not implemented.**
+
+- It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
+- Nothing here is a migration, fixture, or permission.
+- All people and organizations named below are fictional.
+
+### 10.1 Business context
+
+The platform is operated by a single, fictional managed IT service provider, **ABC Company**. ABC employs the service engineers, service managers, and platform administrators who run the platform and support customers.
+
+**Organization A** and **Organization B** are customer organizations. Their staff submit support cases to ABC, and each customer is a row in the existing [`organization`](../db/001_init.sql) table, which owns that customer's cases.
+
+ABC staff investigate and resolve cases only for the customers they have been explicitly authorized to support.
+
+**ABC is not a customer tenant.** It is the implicit platform provider and is **not** inserted into `organization`. Adding it would make ABC a valid case owner, a valid `organization_id` selector, and a valid membership target. It would also break the property every isolation rule relies on, namely that each `organization` row is a separately owned customer tenant. Every tenant query and policy check would then have to exclude the provider row explicitly. That change would need its own decision.
+
+### 10.2 Identity, affiliation, and access grant
+
+| Concept | Question it answers | Representation | Example | Is it authorization? |
+|---|---|---|---|---|
+| **Actor identity** | Who is performing this operation? | Proposed `actor` row, resolved from a server-verified credential (ADR-0005) | Ali | No. It identifies the caller and grants nothing by itself. |
+| **Organizational affiliation** | Which organization does this person belong to, in the business sense? | Not modeled today; see the options in 10.4 | Ali works for ABC; Ahmed works for Organization A | **No.** Affiliation never grants case access. |
+| **Customer access grant** | Which customer organization may this actor access, and with which role? | Proposed `organization_membership` row | Ali holds a `service_engineer` grant for Organization A and another for Organization B | **Yes**, together with an active actor and the role's permission (ADR-0005) |
+
+An ABC engineer can hold access grants for both customers **without being employed by either**. Affiliation and access grants are different facts and must never be used interchangeably:
+
+- employment by a customer does not imply access to its cases;
+- an access grant does not imply employment.
+
+**Naming.** Despite its name, an `organization_membership` row is a **customer access grant**, not a record of employment. This document keeps the name for consistency with ADR-0005 and the other design documents; renaming is an open decision (10.8).
+
+### 10.3 Illustrative actors
+
+These relationships are **illustrative only**. They are not implemented identities, fixtures, or permissions.
+
+| Actor | Affiliation | Responsibility | Access grants (`organization_membership` rows) | Case permissions under ADR-0005 |
+|---|---|---|---|---|
+| Ahmed | Organization A | Requester | (A, `requester`) | Create in A only; no read or list |
+| Fatima | Organization B | Requester | (B, `requester`) | Create in B only; no read or list |
+| Ali | ABC | Service engineer | (A, `service_engineer`), (B, `service_engineer`) | Create, read, list in A; separately, in B |
+| Sara | ABC | Service manager | (A, `service_manager`), (B, `service_manager`) | Create, read, list in A; separately, in B |
+| Bilal | ABC | Platform administrator | None | **No** customer-case access |
+
+**Each grant is separate.** Ali's access to A and to B is two explicit rows. Revoking the B grant leaves A unaffected, and no grant for one customer implies access to another.
+
+**Platform administration is not a role yet.** `platform_administrator` is not a membership role, and no platform-administration permission exists in the current model, so Bilal is simply an ABC actor with no grants.
+
+### 10.4 Affiliation modeling options
+
+| | Option A: no persisted affiliation | Option B: affiliation attributes on `actor` | Option C: separate affiliation relation |
+|---|---|---|---|
+| **Shape** | Existing proposal unchanged; affiliation exists only in documentation and fixture naming conventions | `affiliation_type` (`provider` or `customer`) and a nullable `home_organization_id` FK to `organization` | An `actor_affiliation(actor_id, affiliated_party, …)` relation, possibly with an organization or party type model |
+| **Distinguishes ABC staff from customer staff** | Only by convention; not queryable or enforceable | Yes: `provider` means ABC; `customer` plus `home_organization_id` means a specific customer | Yes |
+| **Valid-state constraints** | None possible | One conditional `CHECK` (below) | Per-row constraints, but a "provider" party must be modeled somehow, which risks putting ABC into a tenant table |
+| **Multiple affiliations (contractors, consultants)** | Not representable | One affiliation per actor only | Supported |
+| **Can role eligibility be enforced?** | No: nothing to check against | Yes, by provisioning validation or a database mechanism (10.6) | Yes, but more joins and rules |
+| **Complexity** | Lowest | Low: two columns and one constraint | Highest: a new table, its keys and lifecycle, and possibly a party model |
+
+The Option B constraint is a **design sketch only**; it has not been executed:
+
+```sql
+-- Proposed actor attributes (design sketch only, not executed)
+affiliation_type     text NOT NULL CHECK (affiliation_type IN ('provider', 'customer')),
+home_organization_id uuid NULL REFERENCES organization(id) ON DELETE RESTRICT,
+CONSTRAINT actor_affiliation_consistent CHECK (
+     (affiliation_type = 'provider' AND home_organization_id IS NULL)
+  OR (affiliation_type = 'customer' AND home_organization_id IS NOT NULL)
+)
+```
+
+**Is one customer affiliation per actor reasonable?** For the current scenario it is: each requester works for exactly one customer, and ABC staff have no customer affiliation. It stops being reasonable for:
+
+- consultants who work for several customers;
+- third-party contractors engaged by ABC;
+- people who change employers but must keep their history.
+
+Those cases point to Option C, adopted through a later forward-only migration.
+
+### 10.5 Recommendation (Proposed)
+
+**Adopt Option B in the first identity migration**, subject to architecture-owner approval. It is the simplest model that makes the provider/customer boundary explicit and checkable without adding a party model. Option A leaves a security-relevant fact ambiguous. Option C adds complexity that the current single-provider scenario does not need.
+
+- **Persist affiliation in the first identity migration.** Add the two `actor` attributes and the `actor_affiliation_consistent` constraint above. Changing this later would require a backfill and a migration of existing actors.
+- **Affiliation is server-managed.** It is set only by server-side provisioning (local fixtures or a future administrative path), never from an API request body, header, or credential claim. No endpoint changes it in this increment.
+- **Affiliation is not an authorization input.** The ADR-0005 policy is unchanged: authorization reads only `actor.is_active`, the active `organization_membership` row for the evaluated organization, and that row's role. Affiliation never grants, widens, or substitutes for an access grant.
+- **ABC staff and multiple customers.** An ABC actor (`affiliation_type = 'provider'`, `home_organization_id IS NULL`) holds one `organization_membership` row per customer it supports, each created explicitly.
+- **Customer requesters.** A customer actor has `affiliation_type = 'customer'` and `home_organization_id` set to its own organization, plus a `requester` grant for that same organization.
+- **Membership name.** Keep `organization_membership` for consistency with ADR-0005, defined explicitly as a customer access grant (10.2). Renaming it, for example to `organization_access_grant`, is cheapest before the first migration and is listed as an open decision.
+- **Future contractors and service principals.**
+  - Contractors with several affiliations would move to Option C through a new migration; Option B's columns can be backfilled into the new relation.
+  - Service principals, meaning non-human actors, need an actor-kind decision of their own. They are not covered by this recommendation.
+
+Proposed ER refinement (not implemented):
+
+```mermaid
+erDiagram
+    organization ||--o{ case_record : "owns (existing)"
+    organization |o--o{ actor : "home of customer actors (proposed)"
+    actor ||--o{ organization_membership : "holds access grants (proposed)"
+    organization ||--o{ organization_membership : "grants access to (proposed)"
+
+    organization {
+        uuid id PK "EXISTING - customer tenants only; ABC is not a row"
+    }
+    actor {
+        uuid id PK "PROPOSED - not implemented"
+        text affiliation_type "PROPOSED - provider or customer"
+        uuid home_organization_id FK "PROPOSED - null for provider staff"
+        boolean is_active
+    }
+    organization_membership {
+        uuid actor_id PK, FK "PROPOSED - customer access grant"
+        uuid organization_id PK, FK "PROPOSED - customer access grant"
+        text role
+        boolean is_active
+    }
+```
+
+**Normalization.** Under Option B, `actor.id → affiliation_type, home_organization_id`, and the relation stays in BCNF. Affiliation is a single-valued property of the actor, while the role remains a property of the (actor, organization) grant (section 5).
+
+### 10.6 Role eligibility is a separate decision
+
+Three layers must not be confused:
+
+| Layer | Content | Status |
+|---|---|---|
+| **1. Role permissions** | What each role may do once granted: engineer and manager create, read, and list; requester create only; no implicit platform-administrator access; an active actor and membership are required | **Accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); not implemented |
+| **2. Role eligibility** | Who may be **assigned** each role, for example:<br>• provider actors may hold `service_engineer` or `service_manager` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Proposed only, not accepted** |
+| **3. Enforcement** | Where eligibility would be checked | **Not designed or implemented** |
+
+**An affiliation field does not prevent privilege escalation by itself.** Anyone able to insert an `organization_membership` row, or to change an actor's affiliation, can still grant privileges. Eligibility would have to be enforced at every path that **writes** grants or affiliation. Candidate mechanisms, none chosen:
+
+- **Server-side provisioning validation**, in the single provisioning path allowed to create or change grants, with a structural check that nothing else writes them.
+- **Database enforcement:** either a trigger on `organization_membership`, or carrying `affiliation_type` into the grant through a composite foreign key to `actor(id, affiliation_type)` plus a `CHECK` on role. The composite key is controlled redundancy that needs `ON UPDATE CASCADE`.
+- **A least-privilege database role** that cannot write grants outside the provisioning path. No such role exists today.
+
+**Materiality.** Enforcing eligibility adds a new invariant to ADR-0005's architecture. ADR-0005 decides what a granted role may do, not who may receive one. The new invariant would constrain provisioning, add data that the trust boundary depends on, and could block legitimate cases, such as an ABC engineer submitting a case on a customer's behalf. That is a **material addition** that needs its own architecture decision before enforcement is implemented, either a new ADR or an explicit amendment approved by the architecture owner. This document records the question only; ADR-0005 is unchanged.
+
+### 10.7 Implications for the first identity migration
+
+- **If Option B is approved:**
+  - `actor` gains `affiliation_type`, `home_organization_id`, and `actor_affiliation_consistent`;
+  - `organization_membership` is unchanged;
+  - ABC is not inserted into `organization`;
+  - fictional fixtures follow the conventions in 10.3.
+- **If it is not approved:** the migration follows Option A, affiliation exists only in fixture naming, and no eligibility rule can ever be checked against stored data.
+- **In both cases:**
+  - the ADR-0005 authorization behavior, the permission matrix, and the proposed test vectors in the [permission policy](authorization-permissions.md) are unchanged;
+  - role-eligibility enforcement is **not** part of the migration unless it is separately approved.
+
+### 10.8 Decisions requiring architecture-owner approval
+
+1. Persist affiliation in the first identity migration using Option B (recommended), or defer it as Option A.
+2. Keep the name `organization_membership`, or rename it before the first migration (for example, to `organization_access_grant`).
+3. Whether to adopt affiliation-based role eligibility (10.6), recorded as a new ADR or an approved amendment, and which enforcement mechanism to use.
+4. Whether ABC staff may also hold `requester` grants, for example to submit cases on a customer's behalf.
+5. How platform administration is represented, if it ever needs permissions. ADR-0005 grants it no implicit customer access.
+6. When to move to Option C for contractors or multiple affiliations, and how service principals are modeled.
+
+## 11. Open decisions
+
+- Affiliation and role eligibility: the six decisions in [section 10.8](#108-decisions-requiring-architecture-owner-approval).
 - Credential verification and the actor mapping:
   - the configuration mechanism and comparison method for test credentials. The lifecycle contract, covering generation with a secure random generator, revocation, rotation that keeps the `actor.id`, and the `401`/`403` outcomes, is accepted in ADR-0005.
 - Identity sources:
@@ -286,9 +456,9 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 - Indexes beyond the primary keys, chosen from measured query plans.
 - An ADR for actor identity and tenant authorization, comparing alternatives. This is [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15 as architecture and not implemented. This document itself accepts nothing.
 
-## 11. Implementation status
+## 12. Implementation status
 
-**Nothing in this document is implemented.** No migration creates `actor` or `organization_membership`. No seed data defines actors or memberships, no credential or policy code exists, and no permission test has run. The case service still treats `organization_id` as a caller-supplied query filter. This design **does not establish tenant authorization**.
+**Nothing in this document is implemented.** No migration creates `actor` or `organization_membership`, and the proposed affiliation attributes (section 10) do not exist. No seed data defines actors or memberships, no credential or policy code exists, and no permission test has run. The case service still treats `organization_id` as a caller-supplied query filter. This design **does not establish tenant authorization**.
 
 The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). A later implementation increment would add:
 
@@ -297,7 +467,7 @@ The authorization architecture is accepted in [ADR-0005](adr/0005-server-verifie
 - server-side policy code;
 - HTTP integration tests with observed results.
 
-## 12. Document review checklist
+## 13. Document review checklist
 
 These are documentation-review items, not executed tests. A checked box means the statement was verified by inspecting this document, the migrations, ADR-0005, the permission policy, and the API contract on 2026-11-15. It does **not** mean that anything is implemented.
 
@@ -310,3 +480,9 @@ These are documentation-review items, not executed tests. A checked box means th
 - [x] Requesters receive no general read or list permission, and platform administrators receive no implicit access to customer data.
 - [x] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is marked untested.
 - [x] Relative links resolve, and the role vocabulary matches the [API contract](api-contract.md).
+- [x] Section 10 does all of the following:
+  - keeps ABC out of the customer-tenant table, and never describes ABC staff as employees of their assigned customers;
+  - presents affiliation as distinct from authorization;
+  - requires an explicit grant per customer;
+  - presents affiliation-based role eligibility as proposed only, not accepted;
+  - leaves the ADR-0005 permission behavior unchanged.
