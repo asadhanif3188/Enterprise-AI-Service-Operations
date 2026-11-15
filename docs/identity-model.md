@@ -1,7 +1,7 @@
 # Actor and Organization Membership — Proposed Relational Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Proposed / design only.** The `actor` and `organization_membership` entities, credential verification, authorization checks, and HTTP endpoints described here are **not implemented**. No migration, fixture, policy code, or test exists for them.  
+**Status:** **Proposed / design only.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). The `actor` and `organization_membership` entities, credential verification, authorization checks, and HTTP endpoints described here are **not implemented**. No migration, fixture, policy code, or test exists for them.  
 **Scope:** The normalized data model that would let the platform represent which actors belong to which customer organizations, and in which role. Choosing an authentication provider, implementing enforcement, and recording permission-test results are out of scope.  
 **Evidence class:** Design only. The SQL, permission matrix, and flows below have not been executed or tested.
 
@@ -221,26 +221,31 @@ WHERE a.id = $1
 - **A returned role is not yet permission.** Application policy must still check that the role grants the requested action (section 8). An unrecognized role means deny.
 - **Check/use race.** If this lookup runs as a separate step before the case operation, a membership or actor revoked in between does not stop an operation already authorized: a time-of-check to time-of-use gap. Options to evaluate before implementation:
   - Run authorization and the protected read or write in the same transaction, or the same statement. For example, join the membership predicate into the case query.
-  - Lock the membership row (`FOR SHARE` or `FOR KEY SHARE`) so that a concurrent revocation waits.
+  - Lock the actor row, then the membership row, `FOR SHARE`, so that a concurrent revocation waits. **Not** `FOR KEY SHARE`: it does not block updates to non-key columns such as `is_active` or `role`. This is the write strategy accepted in ADR-0005.
   - Explicitly accept that revocation applies only to requests that start after it commits.
 
-  Even a single statement sees a snapshot, so a revocation that commits during the statement does not affect it. The project must decide **when revocation takes effect**, including for in-flight requests and any cached authorization result, before claiming revocation behavior. These options and their PostgreSQL lock semantics are compared in the [authentication and authorization sequence](authentication-authorization-sequence.md#8-checkuse-timing-and-revocation).
+  Even a single statement sees a snapshot, so a revocation that commits during the statement does not affect it. [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted) settles a **minimum** revocation contract, not instant revocation:
+  - single scoped statements for reads and lists;
+  - short READ COMMITTED write transactions that lock the actor, then the membership, `FOR SHARE`;
+  - no cached decisions.
+
+  The contract is untested. These options and their PostgreSQL lock semantics are compared in the [authentication and authorization sequence](authentication-authorization-sequence.md#8-checkuse-timing-and-revocation).
 - **Row-level security** in PostgreSQL remains optional defense in depth. It does not replace a verified actor.
 
 ## 8. Provisional permissions
 
-These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-proposed). They are **not** an implementation and have not been tested. The detailed policy proposal, including predicates, HTTP outcomes, and proposed test vectors, is in [Case authorization — minimum role-permission policy](authorization-permissions.md).
+These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-accepted-in-adr-0005). They are **not** an implementation and have not been tested. The detailed policy proposal, including predicates, HTTP outcomes, and proposed test vectors, is in [Case authorization — minimum role-permission policy](authorization-permissions.md).
 
 | Membership state and role | `case:create` | `case:read` | `case:list` | Status transition over HTTP |
 |---|---|---|---|---|
 | Active `service_engineer` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
 | Active `service_manager` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
-| Active `requester` | Proposed allow in member organization (create-only; [not yet accepted](authorization-permissions.md#requester-create-only-proposed-refinement)) | Deny until per-case requester ownership is modeled | Deny | Not exposed |
+| Active `requester` | Allow in member organization only (create-only; [accepted in ADR-0005](authorization-permissions.md#requester-create-only-accepted-in-adr-0005), not implemented) | Deny until per-case requester ownership is modeled | Deny | Not exposed |
 | `platform_administrator` without an explicit, separately decided delegation | No implicit access | No implicit access | No implicit access | No implicit access |
 | No membership in the target organization | Deny | Deny (nondisclosing `404`) | Deny (`403`) | Deny |
 | Inactive actor, inactive membership, or unrecognized role | Deny | Deny | Deny | Deny |
 
-Every rule is scoped to one organization. Membership in organization A grants nothing in organization B. Any combination not listed is denied. Before any endpoint is exposed, the following must be reviewed: acceptance of the proposed requester create-only rule, any platform-administrator exception, and the HTTP status returned to an inactive actor with a valid credential (`401` or `403`).
+Every rule is scoped to one organization. Membership in organization A grants nothing in organization B. Any combination not listed is denied. [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) accepts requester create-only and `403` for an inactive actor with a valid credential. Any platform-administrator exception would need a separate decision.
 
 ## 9. Key strategy
 
@@ -256,30 +261,27 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 ## 10. Open decisions
 
 - Credential verification and the actor mapping:
-  - how test credentials are configured and resolved without committing secrets;
-  - credential revocation.
+  - the configuration mechanism and comparison method for test credentials. The lifecycle contract, covering generation with a secure random generator, revocation, rotation that keeps the `actor.id`, and the `401`/`403` outcomes, is accepted in ADR-0005.
 - Identity sources:
   - how `actor` relates to future identity-provider subjects;
   - how service-to-service principals are represented.
 - Membership changes:
-  - when revocation takes effect for concurrent or in-flight requests (section 7);
+  - verification under concurrency of the minimum revocation contract accepted in ADR-0005 (section 7);
   - whether revocation may hard-delete a membership row;
   - whether membership changes need a history relation and an `updated_at` column.
 - Roles:
   - whether one role per actor per organization is enough (section 4);
-  - whether to accept the proposed requester create-only rule ([authorization policy](authorization-permissions.md#requester-create-only-proposed-refinement));
   - how requester-owned single-case access will be modeled.
 - Platform administrators: platform-wide administration, and any delegated access to customer data.
 - Enforcement:
-  - where the role-permission mapping lives;
-  - whether authorization and the case operation share one transaction or statement.
+  - how the structural no-bypass check is implemented. The central enforcement layer and transaction boundaries are accepted in ADR-0005.
 - `case_status_event`: whether events gain a verified `actor_id` reference, and what happens to existing `actor_label` values.
 - Case assignment: how an engineer is assigned to a case.
 - Database controls:
   - optional row-level security;
   - a least-privilege application database role.
 - Indexes beyond the primary keys, chosen from measured query plans.
-- An ADR for actor identity and tenant authorization, comparing alternatives. It is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**; **none is accepted by this document**.
+- An ADR for actor identity and tenant authorization, comparing alternatives. This is [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15 as architecture and not implemented. This document itself accepts nothing.
 
 ## 11. Implementation status
 
@@ -303,5 +305,5 @@ These are review items, not executed tests.
 - [ ] Authentication, membership representation, and enforcement are kept distinct. `display_name` and request headers are never treated as identity.
 - [ ] A client-supplied organization ID can only narrow scope. A missing, inactive, or unrecognized membership, role, or actor is denied.
 - [ ] Requesters receive no general read or list permission, and platform administrators receive no implicit access to customer data.
-- [ ] The check/use race and the open question of when revocation takes effect are flagged before implementation.
+- [ ] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is marked untested.
 - [ ] Relative links resolve, and the role vocabulary matches the [API contract](api-contract.md).

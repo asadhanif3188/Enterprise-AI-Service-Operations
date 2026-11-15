@@ -2,7 +2,7 @@
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** This document records current behavior and the accepted future contract. **Idempotent case creation is not implemented.** The contract below is an accepted architecture decision for a future create-case API, not a current guarantee. No database-backed duplicate-creation or idempotency test has been executed.  
-**Decision record:** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (**Accepted** 2026-11-15 as architecture; not implemented) records this decision, the alternatives considered, and the tradeoffs. Identity and authorization are proposed in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed). This document remains the detailed design reference for current behavior, contract rules, expected outcomes, open decisions, and required validation.
+**Decision record:** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (**Accepted** 2026-11-15 as architecture; not implemented) records this decision, the alternatives considered, and the tradeoffs. Identity and authorization are accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; not implemented). This document remains the detailed design reference for current behavior, contract rules, expected outcomes, open decisions, and required validation.
 
 ## 1. The problem
 
@@ -56,8 +56,8 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 **Decision status:** **Accepted** as architecture in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) on 2026-11-15.
 
 - **Not implemented.** `create_case()` remains non-idempotent, and no test exists.
-- **Dependency.** The rules depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed) for verified identity and authorization.
-- **Disabled until ready.** Keyed creation stays disabled until ADR-0005 is Accepted, both are implemented, and the tests in section 5 have passed.
+- **Dependency.** The rules depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; not implemented) for verified identity and authorization.
+- **Disabled until ready.** Keyed creation stays disabled until both ADRs are implemented and the tests in section 5 have passed.
 
 | # | Rule |
 |---|---|
@@ -101,9 +101,13 @@ This sketch is a **design aid only**. It is not a migration, it has not been exe
 --                             fingerprint_version, request_fingerprint,
 --                             case_id NOT NULL REFERENCES case_record, created_at)
 --   UNIQUE (organization_id, actor_id, operation, idempotency_key)
--- Preconditions: credential verified, actor active, membership active, case:create granted,
---                header and body validated, fingerprint (version 1) computed.
-BEGIN;
+-- Preconditions: credential verified; header and body validated; fingerprint (version 1) computed.
+BEGIN;  -- READ COMMITTED
+-- ADR-0005 write authorization: two statements, actor first, then membership.
+SELECT 1 FROM actor WHERE id = $verified_actor AND is_active FOR SHARE;           -- no row -> 403
+SELECT role FROM organization_membership
+ WHERE actor_id = $verified_actor AND organization_id = $requested_org AND is_active
+   FOR SHARE;                                    -- no row, or role lacks case:create -> 403
 INSERT INTO case_record (organization_id, title, description)
 VALUES ($authorized_org, $title, $description)
 RETURNING id;                                         -- $new_case_id
@@ -114,9 +118,10 @@ VALUES ($authorized_org, $verified_actor, 'case:create', $key, 1, $fingerprint, 
 ON CONFLICT (organization_id, actor_id, operation, idempotency_key) DO NOTHING
 RETURNING case_id;
 -- One row returned:  COMMIT, then 201 Created with the full creation representation.
--- No row returned:   ROLLBACK (discarding the new case), then read the committed record
---                    in the same scope: equal version and fingerprint -> 200 replay
---                    (id, organization_id); otherwise -> 422 idempotency_payload_mismatch.
+-- No row returned:   read the committed record in the same scope (still holding the
+--                    authorization locks), then ROLLBACK (discarding the new case):
+--                    equal version and fingerprint -> 200 replay (id, organization_id);
+--                    otherwise -> 422 idempotency_payload_mismatch.
 ```
 
 Under READ COMMITTED, the second `INSERT` waits if a concurrent transaction holds an uncommitted record with the same scope. When that transaction finishes, the `INSERT` either returns no row (the other transaction committed) or proceeds (it rolled back).

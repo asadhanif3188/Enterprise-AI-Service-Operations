@@ -1,9 +1,9 @@
 # Case Authorization — Minimum Role-Permission Policy
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Proposed / design only.** No credential verification, `actor` or `organization_membership` table, HTTP endpoint, policy code, or authorization test exists. Nothing here has been executed.  
+**Status:** **Design only.** The policy is **accepted as architecture** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. No credential verification, `actor` or `organization_membership` table, HTTP endpoint, policy code, or authorization test exists. Nothing here has been executed.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
-**Decision boundary:** This document is a policy proposal for review. It is **not** an Accepted ADR, not an implementation, and not proof of tenant isolation. Where and how the policy is enforced belongs to the authorization ADR, now [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed). A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
+**Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. It is not an implementation and not proof of tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
@@ -56,14 +56,14 @@ any other value  -> {}            # unknown roles get no permissions; there is n
 
 No role inherits permissions from another. A membership in one organization grants nothing in another. No superuser exception exists. `platform_administrator` is a responsibility in the [requirements](requirements.md#3-users-and-responsibilities), not a membership role ([identity model §4](identity-model.md#4-proposed-organization_membership)). It confers **no** cross-customer access.
 
-### Requester: create-only (proposed refinement)
+### Requester: create-only (accepted in ADR-0005)
 
-Earlier guidance listed requester creation as a *candidate* ([identity model §8](identity-model.md#8-provisional-permissions), [API contract §4](api-contract.md#authorization-rule-proposed)). This document **proposes** settling it as follows:
+Earlier guidance listed requester creation as a *candidate*. This document proposed settling it as follows, and [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) **accepted** the rule on 2026-11-15:
 
 - **Create:** an active requester may `case:create` only in an organization where it holds an active `requester` membership.
 - **Read and list:** the requester receives **no** `case:read` and **no** `case:list`, not even for cases it submitted.
 
-This is an intentional refinement for review. It is **not yet accepted** and not implemented.
+The rule is accepted as architecture. It is **not implemented**.
 
 **Rationale.** The requirements name case submission as the requester's responsibility ([§3](requirements.md#3-users-and-responsibilities), [§4 step 1](requirements.md#4-core-workflow)). Granting create therefore serves an intended business function. Reading is withheld because `case_record` has no requester-ownership relation, so an organization-wide read would expose other requesters' cases.
 
@@ -80,7 +80,7 @@ The policy is **pseudocode for review**, not an implementation:
 decide(credential, action, request):
   actor_id := resolve_from_server_controlled_config(credential)
   if actor_id is none:                                   -> 401
-  if not actor(actor_id).is_active:                      -> deny   (401 vs 403 pending, §5)
+  if not actor(actor_id).is_active:                      -> 403
   org := persisted case_record.organization_id           if action = case:read
          request.organization_id (selector only)         if action in {case:create, case:list}
   if action = case:read and the case does not exist:     -> deny   (404)
@@ -107,12 +107,12 @@ These follow the [API contract error table](api-contract.md#8-proposed-error-con
 
 | Condition | Outcome | Disclosure rule |
 |---|---|---|
-| Missing, invalid, or unrecognized credential | `401 Unauthorized` | No fallback to any identity header |
+| Missing, invalid, unrecognized, or revoked credential | `401 Unauthorized` | No fallback to any identity header |
 | Verified actor, explicit target organization not authorized for `case:create` or `case:list` (no membership, inactive membership, or role lacks the permission) | `403 Forbidden` | No case rows; no membership details |
 | `GET /cases/{id}`: case does not exist, **or** exists in an organization the actor is not authorized to read | The **same** generic `404 Not Found` | The two cases must be indistinguishable in status and body |
 | Requester calls `GET /cases/{id}` in its own organization | `404 Not Found` (falls under the previous row) | Same as above |
 | `GET /cases` without `organization_id`, or with an invalid one | Rejected as invalid; the contract's `400`/`422` split is not settled for this case | Never falls back to listing all organizations |
-| Verified credential, **inactive actor** | **Always denied.** `401` versus `403` is **pending**, to be aligned with credential-revocation semantics | No case data |
+| Verified credential, **inactive actor** | `403 Forbidden`, always denied (ADR-0005). A revoked credential gets `401` instead. | No case data |
 | Attempted HTTP update or transition | No such route exists, and nothing is mutated | Not evidence that authorized updates are enforced |
 
 Error bodies never include foreign case data, SQL, credentials, or membership lists.
@@ -136,7 +136,7 @@ Every vector below is **proposed, not executed**. No policy, API, or security te
 | V11 | Engineer, active in A only | `POST /cases` for B | Deny, `403` | **No** `case_record` row inserted; B's case count unchanged | Proposed, not executed |
 | V12 | Mixed roles: engineer in A, requester in B | List A; list B; `POST` for B; `GET` a case owned by B | `200`; `403`; `201`; `404` | Roles evaluated per organization; one new B case; no B rows returned | Proposed, not executed |
 | V13 | Engineer, **inactive** membership in A | `GET` a case owned by A; list A | `404`; `403` | No change | Proposed, not executed |
-| V14 | **Inactive** actor, active engineer membership in A | `POST /cases` for A | Deny (status pending: `401` or `403`) | No row inserted | Proposed, not executed |
+| V14 | **Inactive** actor, active engineer membership in A | `POST /cases` for A | Deny, `403` | No row inserted | Proposed, not executed |
 | V15 | Active actor, no membership in A | List A | Deny, `403` | No rows in the response | Proposed, not executed |
 | V16 | Policy evaluated with a role value outside the mapping (policy-level test) | `case:create` | Deny | No row inserted | Proposed, not executed |
 | V17 | Platform-administrator responsibility, no membership in A | List A; `GET` a case owned by A | `403`; `404` | No rows; no case data | Proposed, not executed |
@@ -161,7 +161,7 @@ This policy grants none of the following. They need separate designs, and in sev
 
 None of these is resolved by this document.
 
-- **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. Options are listed in [identity model §7](identity-model.md#7-illustrative-membership-lookup); the choice is still open.
+- **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. Its behavior under concurrency is untested.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
 - **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design, but nothing is implemented, and requester create-only itself is still only proposed:
   - every retry is authorized for `case:create` **before** any key lookup;
@@ -171,12 +171,10 @@ None of these is resolved by this document.
   `case:create` is **not** `case:read`. A replay must never act as a read of the current state.
 - **Audit attribution.** `case_status_event.actor_label` stays unverified. Denied attempts and successful creates are not attributed to a verified actor anywhere.
 - **Breadth of engineer and manager visibility.** Organization-wide visibility should be revisited once assignment, sensitive case classes, or internal teams exist.
-- **The inactive-actor status code** (`401` versus `403`).
 - **Optional PostgreSQL row-level security** as defense in depth.
 - **A least-privilege database role**: the local components still use the development account.
 - **Test-only credentials**: how they are configured and resolved without committing secrets.
-- **The authorization ADR**: where enforcement lives, and whether the policy, row-level security, and query scoping are combined. It is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**. **This document accepts no ADR.**
-- **Requester creation itself** remains a proposed choice until that ADR, or an equivalent review, accepts it.
+- **Enforcement details beyond ADR-0005.** [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted) settles where enforcement lives, the inactive-actor status (`403`), and requester create-only. Still open: the structural no-bypass check mechanism, the credential configuration mechanism, and whether row-level security is added for defense in depth.
 
 ## 9. Design review checklist
 
@@ -184,7 +182,7 @@ None of these is resolved by this document.
 - [ ] Every allow path requires all six predicates in section 4. No path allows access based on a role name, header, display name, or supplied organization ID alone.
 - [ ] Unknown roles, inactive actors, inactive memberships, and missing memberships are always denied.
 - [ ] `case:read` evaluates the persisted case owner; a nonexistent case and a foreign case produce the same `404`.
-- [ ] Requester create-only is presented as a proposed refinement, with its deferred status-viewing consequence stated.
+- [ ] Requester create-only is presented as accepted in ADR-0005, but not implemented, with its deferred status-viewing consequence stated.
 - [ ] `platform_administrator` has no implicit cross-customer access.
 - [ ] All test vectors are marked proposed and not executed, and each states a database-state assertion.
 - [ ] Excluded permissions and open issues are recorded, not silently decided.

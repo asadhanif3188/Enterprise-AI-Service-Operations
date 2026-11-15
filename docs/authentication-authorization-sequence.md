@@ -1,8 +1,8 @@
 # Server-Side Authentication and Authorization Sequence
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Proposed / design only.** None of the following exists: an HTTP API, credential verification, test credentials, an `actor` or `organization_membership` table, policy code, or an HTTP tenant-isolation test.  
-**Scope:** The request-time sequence for `POST /cases`, `GET /cases/{id}`, and `GET /cases`. It describes **how** the proposed [minimum role-permission policy](authorization-permissions.md) could be enforced. It does not change that policy, adopt an authorization ADR, or implement anything.  
+**Status:** **Design only.** The architecture is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. None of the following exists: an HTTP API, credential verification, test credentials, an `actor` or `organization_membership` table, policy code, or an HTTP tenant-isolation test.  
+**Scope:** The request-time sequence for `POST /cases`, `GET /cases/{id}`, and `GET /cases`. It describes **how** the [minimum role-permission policy](authorization-permissions.md) is to be enforced, as accepted in ADR-0005. It does not implement anything.  
 **Evidence class:** Architecture design. The diagrams, pseudocode, and test cases are proposals, not observed results.
 
 ## 1. Baseline
@@ -26,7 +26,7 @@
 - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md): AI output and case text never confer permissions.
 - [ADR-0003](adr/0003-application-controlled-case-transitions.md): `transition_case()` must not be exposed to untrusted callers.
 - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): **Accepted** (2026-11-15) as design, **not implemented**. Its key scope is the *authorized* organization plus the *verified* actor.
-- [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Proposed**. It records this sequence's identity and authorization approach as an architecture decision for review.
+- [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Accepted** (2026-11-15) as architecture, **not implemented**. It records this sequence's identity, enforcement, and revocation decisions.
 
 **Policy summary.** All rows below assume an active actor with an active membership in the organization being evaluated. Any other state is denied.
 
@@ -34,7 +34,7 @@
 |---|---|---|---|
 | `service_engineer` | Allow | Allow | Allow |
 | `service_manager` | Allow | Allow | Allow |
-| `requester` | Allow, **proposed** create-only; not accepted in any ADR | Deny | Deny |
+| `requester` | Allow, create-only in its own member organization (accepted in ADR-0005) | Deny | Deny |
 
 `platform_administrator` has no implicit access. Unknown roles have no permissions.
 
@@ -64,7 +64,7 @@ All of these components are logical and **planned**. They can be modules in one 
 
 **Which component enforces the decision?** The authorized-case-operations layer. A route hands that layer a verified actor and a validated request, and the layer **calls the policy itself**. A route therefore cannot perform a case operation while skipping the decision.
 
-Python cannot make the lower-level functions unreachable. The rule that routes never import `src/case_service.py` directly must therefore be backed by code review and a future structural test (**OPEN**: how that is checked). The authorized scope is a value created by the server, not a cryptographic capability.
+Python cannot make the lower-level functions unreachable. The rule that routes never import `src/case_service.py` directly is therefore backed by code review and an automated structural check (accepted in ADR-0005; the check's mechanism is chosen during implementation). The authorized scope is a value created by the server, not a cryptographic capability.
 
 ## 4. Logical sequence
 
@@ -90,7 +90,7 @@ sequenceDiagram
         alt Denied, or case not found
             POL-->>OPS: Denial
             OPS-->>API: Denial category, no case data
-            API-->>C: 403, generic 404, or inactive-actor status (OPEN)
+            API-->>C: 403 (including inactive actor) or generic 404
         else Allowed
             POL-->>OPS: Authorized scope
             OPS->>DB: Operation restricted to the authorized organization
@@ -119,10 +119,14 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 
 **What this is not:** production authentication, OIDC, JWT signature verification, SSO, or session management. Until real authentication is designed, the demonstration API must stay local or test-only. Credential and lookup-key values must never be logged.
 
-**OPEN:**
+**Accepted in ADR-0005:**
 
-- How credentials are generated, stored (for example, as a hash rather than plaintext), compared, rotated, and revoked.
-- What happens when a valid credential maps to an actor ID that does not exist: deny is certain, but the status code is not yet chosen.
+- Credentials are generated with a cryptographically secure random generator.
+- Revocation removes or disables the credential mapping. Rotation replaces the credential and keeps the same `actor.id`.
+- A missing, invalid, unknown, or revoked credential gets `401`. So does a credential that maps to an actor ID with no `actor` row.
+- A valid credential for an inactive actor gets `403`.
+
+**Left to implementation:** the configuration mechanism and the comparison method, for example a hashed lookup or a constant-time comparison.
 
 ## 6. Per-endpoint decision flows
 
@@ -130,12 +134,12 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 
 1. Authenticate (`401` on failure).
 2. Validate the body. Reject unexpected fields such as `id`, `actor_id`, `role`, `status`, or `version`; they are **not silently ignored** ([API contract §5](api-contract.md#5-post-cases--create-a-case-planned)). The body's `organization_id` is an **untrusted selector**.
-3. Check that the actor is active (deny, with the status OPEN, if not).
+3. Check that the actor is active (`403` if not).
 4. Look up the membership for `(actor, requested org)`. It must be active, and its role must grant `case:create`. Otherwise return `403` with no case data.
 
    A nonexistent organization has no membership, so it gets the same `403` as a foreign organization. The response does not reveal whether the organization exists.
 5. Create the case using the **authorized** organization from the scope, not the raw body value. It starts at `NEW`, version `1`, with no AI call. Return `201` only after commit.
-6. **Keyed creation, when enabled** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Accepted design; disabled until ADR-0005 is accepted and both are implemented and tested):
+6. **Keyed creation, when enabled** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Accepted design; disabled until ADR-0004 and ADR-0005 are implemented and tested):
    - Authorize first, before any replay lookup.
    - Scope the key as `(authorized organization_id, verified actor_id, 'case:create', key)`.
    - A replay returns `200` with identity only (`id`, `organization_id`), never the current case state (section 9).
@@ -179,7 +183,8 @@ run_authorized(scope: AuthorizedScope, validated_request) -> Result      # the o
 
 authorize:
   action not in {case:create, case:read, case:list}  -> Denial(unsupported)
-  actor missing or not active                         -> Denial(inactive_actor)   # status OPEN
+  actor not active                                    -> Denial(inactive_actor)   # 403
+  # a credential mapped to a missing actor row is treated as unresolved -> 401
   org := persisted case owner                         if action = case:read
          validated request organization_id (selector) otherwise
   case:read and case not found                        -> Denial(not_found)        # 404
@@ -195,7 +200,7 @@ These predicates are the same as [policy §4](authorization-permissions.md#4-pol
 | Situation | Outcome |
 |---|---|
 | Missing, invalid, or unknown bearer credential | `401`; no lookup of any client-supplied identity |
-| Valid credential, inactive actor | **Always denied.** `401` versus `403` is **OPEN** |
+| Valid credential, inactive actor | `403`, always denied (ADR-0005) |
 | No membership, inactive membership, or role lacks the permission, on create or list | `403`, no rows, no membership details |
 | Unknown role value | Denied; treated as having no permissions |
 | Unknown, foreign, or unreadable case on `GET /cases/{id}` | Identical generic `404` status and body |
@@ -219,24 +224,31 @@ A single statement does not fully close the gap either. Each PostgreSQL statemen
 
 **Read-side limit.** Once a read response has been sent, no revocation can take it back. Revocation can only affect requests that have not yet been authorized or committed.
 
-**Decision: none.** This document **chooses no revocation guarantee**. The following are candidates for the authorization ADR ([ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), Proposed) to evaluate:
+**Accepted minimum contract ([ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), 2026-11-15).** This is not instant revocation.
 
-- B for reads and lists.
-- C for writes, with the contract "a request that acquired its locks before the revocation may finish; requests authorized after the revocation commits are denied".
+- **Reads and lists use option B.** One scoped statement carries the actor and membership predicates. For reads, a preceding actor-status check yields `403` for an inactive actor. A request that began before a revocation committed may complete under its snapshot.
+- **Writes use option C, under READ COMMITTED:**
+  1. lock the actor row `FOR SHARE`, then the membership row `FOR SHARE`, in **two separate statements**, since one joined locking statement does not guarantee lock order;
+  2. hold both locks through the write and the commit.
 
-Adopting either requires:
+  A revocation that commits first is seen, and the request is denied. A request that took its locks first may finish while the revocation waits.
+- **Keyed creation.** The idempotency lookup and reservation run inside this locked transaction.
+- **No caching.** Authorization decisions are not cached across requests.
 
-- an accepted ADR;
-- a defined lock order (for example, actor then membership), isolation level, lock timeouts, and error mapping;
-- **executed** concurrency tests.
+**Still implementation concerns that need executed tests:**
 
-Never hold locks across model calls, long-running work, or client I/O. Caching decisions across requests is excluded from the first version (**OPEN** for later).
+- lock timeouts and bounded waits;
+- deadlock handling (revocations that touch both rows should lock actor, then membership);
+- error mapping;
+- contention.
+
+The contract's behavior under concurrency is **untested**. Never hold locks across model calls, long-running work, or client I/O.
 
 ## 9. Requester create-only and idempotent replay
 
 **A later GET.** A requester's `201 Created` response returns the case as part of the create operation. That is not a `case:read` grant. A later `GET /cases/{id}`, including on the `Location` URL, returns the generic `404` (vector V06). Viewing a case's status is deferred until requester ownership is modeled.
 
-**Replay.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (**Accepted** design) and [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (**Proposed**) define the following contract. None of it is implemented.
+**Replay.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) and [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), both **Accepted** as design, define the following contract. None of it is implemented.
 
 1. **Authorization runs before the replay lookup** on every replay. An actor whose actor record or membership is inactive is denied, and the response says nothing about stored keys.
 2. **Identity-only replay.** A replay returns `200 OK` with `Location`, `Idempotency-Replayed: true`, and only `id` and `organization_id`, taken from the idempotency record. It never contains the current status, text, or version, so a create-only actor gains no `case:read` ability and sees no later changes.
@@ -244,7 +256,7 @@ Never hold locks across model calls, long-running work, or client I/O. Caching d
 
    The deliberate tradeoff is that two actors who submit one incident are not deduplicated.
 
-**Still pending:** acceptance of ADR-0005, implementation of both ADRs, and executed tests (S08, S09, and the ADR-0004 list). Until then this is an accepted design intention, not a guarantee.
+**Still pending:** implementation of both ADRs, and executed tests (S08, S09, and the ADR-0004 list). Until then this is an accepted design intention, not a guarantee.
 
 ## 10. Future negative test cases
 
@@ -252,13 +264,13 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
 
 | ID | Scenario | Expected outcome | Status |
 |---|---|---|---|
-| S01 | Valid credential mapped to an actor ID that does not exist | Denied; no case data; no insert | Proposed, not executed |
+| S01 | Valid credential mapped to an actor ID that does not exist | `401`; no case data; no insert | Proposed, not executed |
 | S02 | `POST /cases` naming a nonexistent organization, from an actor active in A | `403`, identical to a foreign organization; no insert | Proposed, not executed |
 | S03 | `POST /cases` body containing `actor_id`, `status`, or `version` | Rejected as invalid; no insert | Proposed, not executed |
-| S04 | A route attempts to reach case data without going through the authorized-operations layer | Structural or review check fails (mechanism OPEN) | Proposed, not executed |
+| S04 | A route attempts to reach case data without going through the authorized-operations layer | The structural check fails the build or review | Proposed, not executed |
 | S05 | Database unavailable during the policy lookup | Generic `500`; no protected operation; not `403` or `404` | Proposed, not executed |
 | S06 | List cursor issued for A, replayed with `organization_id=B` by an actor in A only | `403` or cursor rejected; no B rows | Proposed, not executed |
-| S07 | Membership revoked between authorization and write, under each candidate strategy (A, B, C) | Observed ordering recorded; no guarantee claimed until an ADR is accepted | Proposed, not executed |
+| S07 | Membership or actor revoked concurrently with a write, under the accepted write-locking contract | A revocation that commits first leads to denial. An operation holding locks first completes while the revocation waits. Observed ordering recorded. | Proposed, not executed |
 | S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Proposed, not executed |
 | S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `422` mismatch about, the first requester's case | Proposed, not executed |
 | S10 | Logs after a `401`, a `403`, and a `404` | No credential value, no case text, no client header recorded as identity | Proposed, not executed |
@@ -270,14 +282,14 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
    - **Create:** the selector must match an active membership with `case:create`.
    - **Get by ID:** the persisted owner must match an active membership with `case:read`, otherwise a generic `404`.
    - **List:** the selector must match an active membership with `case:list`, and every query is scoped to that organization (section 6).
-3. **What enforces the decision?** The authorized-case-operations layer, which calls the policy itself and is the only path routes use to reach case data. How that rule is checked structurally is OPEN (section 3).
-4. **What happens on failures?** A missing membership gives `403`, or `404` for a read. A disabled actor is always denied, with the status OPEN. An unknown role is denied. An invalid token gives `401`. An unknown case gives the generic `404`. A database outage gives a generic `500` and no protected operation (section 7).
+3. **What enforces the decision?** The authorized-case-operations layer, which calls the policy itself and is the only path routes use to reach case data. An automated structural check plus code review detects bypasses (section 3).
+4. **What happens on failures?** A missing membership gives `403`, or `404` for a read. A disabled actor gets `403`. An unknown role is denied. An invalid token gives `401`. An unknown case gives the generic `404`. A database outage gives a generic `500` and no protected operation (section 7).
 5. **Why does check-then-write race, and what can be done?** The decision and the write are separated in time, and statements read snapshots. The options are a combined predicate (B) or a short transaction holding `FOR SHARE` locks (C). No guarantee is chosen (section 8).
-6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. All of this is proposed, and none of it is accepted or tested (section 9).
+6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. This is accepted as design, but not implemented or tested (section 9).
 
-## 12. Handoff to the authorization ADR
+## 12. Resolution in the authorization ADR
 
-The future ADR must settle, or explicitly constrain:
+[ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted 2026-11-15) settles or constrains each of the items below:
 
 - the credential lifecycle and the credential-to-actor mapping;
 - the inactive-actor status code;
@@ -289,16 +301,23 @@ The future ADR must settle, or explicitly constrain:
 - direct database writers, optional row-level security, and a least-privilege database role;
 - decision logging and attribution.
 
-That ADR is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**. ADRs 0001–0003 are unchanged. ADR-0004 was accepted separately, as design only, and **this document accepts no ADR**.
+Still open after acceptance:
+
+- the credential configuration and comparison mechanism;
+- the structural-check mechanism;
+- row-level security and a least-privilege database role;
+- verified audit attribution.
+
+This document itself accepts no ADR.
 
 ## 13. Document review checklist
 
-- [ ] Every component, flow, and test is labeled PLANNED or PROPOSED; only PostgreSQL and the case service are EXISTING.
+- [ ] Every component, flow, and test is labeled PLANNED or PROPOSED (not implemented); only PostgreSQL and the case service are EXISTING.
 - [ ] Every allow path starts from a verified credential and requires an active actor, an active membership, and the action-specific permission.
 - [ ] Create and list use an untrusted selector; get by ID uses the persisted owner. A client-supplied organization ID can only narrow access.
-- [ ] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). The inactive-actor status is OPEN.
-- [ ] Requester create-only appears as proposed, and neither a later GET nor a replay grants read access.
-- [ ] The check/use options are compared, the lock semantics are cited, and no revocation guarantee is claimed.
+- [ ] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). An inactive actor gets `403`.
+- [ ] Requester create-only appears as accepted in ADR-0005 but not implemented, and neither a later GET nor a replay grants read access.
+- [ ] The check/use options are compared, the lock semantics are cited, and only the accepted minimum revocation contract is stated. Nothing is claimed as tested.
 - [ ] No migration, code, credential, fixture, ADR acceptance, or test result is claimed.
 
 **References:** [OWASP API Security Top 10 2023 — API1: Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/), [PostgreSQL 16 explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html), and [PostgreSQL 16 transaction isolation](https://www.postgresql.org/docs/16/transaction-iso.html).

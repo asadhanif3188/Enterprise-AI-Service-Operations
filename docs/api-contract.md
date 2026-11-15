@@ -14,8 +14,8 @@ This contract must conform to the following [Architecture Decision Records](adr/
 | [ADR-0001: PostgreSQL as the Authoritative Case Store](adr/0001-postgresql-authoritative-case-store.md) | Accepted | Case creation and retrieval operate against PostgreSQL as the authoritative store. API responses report the case state recorded there. |
 | [ADR-0002: AI Suggestions Are Non-Authoritative](adr/0002-ai-suggestions-non-authoritative.md) | Accepted | `POST /cases` creates a case without requiring AI inference. AI output cannot authorize a request or change case state. |
 | [ADR-0003: Application-Controlled Case State Transitions](adr/0003-application-controlled-case-transitions.md) | Accepted | The existing `transition_case()` function must not be exposed through an HTTP endpoint until authentication, tenant authorization, and approval checks exist. The service currently performs none of these checks. |
-| [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md) | **Accepted** (2026-11-15; design only) | The retry contract for `POST /cases` ([section 5](#5-post-cases--create-a-case-planned)) follows the accepted design: keys scoped to the authorized organization and the verified actor, an identity-only `200` replay, and `422` for a payload mismatch. It is **not implemented**, depends on ADR-0005 (Proposed), and keyed creation stays disabled. No part of this contract may claim that case creation is idempotent or duplicate-safe until the tests listed in the ADR have recorded observed results. |
-| [ADR-0005: Server-Verified Identity and Organization-Scoped Case Authorization](adr/0005-server-verified-identity-and-tenant-authorization.md) | **Proposed** | Identity, authorization, and denial outcomes in [section 4](#4-trust-boundary-sequence) follow this proposal. It is **not implemented**, and no tenant-isolation claim may be made until its tests have recorded observed results. |
+| [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md) | **Accepted** (2026-11-15; design only) | The retry contract for `POST /cases` ([section 5](#5-post-cases--create-a-case-planned)) follows the accepted design: keys scoped to the authorized organization and the verified actor, an identity-only `200` replay, and `422` for a payload mismatch. It is **not implemented**, depends on ADR-0005 (Accepted; not implemented), and keyed creation stays disabled. No part of this contract may claim that case creation is idempotent or duplicate-safe until the tests listed in the ADR have recorded observed results. |
+| [ADR-0005: Server-Verified Identity and Organization-Scoped Case Authorization](adr/0005-server-verified-identity-and-tenant-authorization.md) | **Accepted** (2026-11-15; design only) | Identity, authorization, revocation, and denial outcomes in [section 4](#4-trust-boundary-sequence) follow this decision. It is **not implemented**, and no tenant-isolation claim may be made until its tests have recorded observed results. |
 
 **Accepted does not mean implemented.** ADR-0001 to ADR-0003 include requirements, such as access control and authorization, that the current code does not meet. See the [system context](system-context.md#4-capability-status) for current capability status.
 
@@ -66,7 +66,7 @@ flowchart TD
 
 **Request authority flows** from an authenticated actor, to a verified membership, to a permitted operation, to scoped database access. It never flows from a model response or an untrusted organization identifier. The planned HTTP and idempotency boundaries are labeled explicitly. The existing local triage runner, not the model adapter, persists non-authoritative suggestions, and it remains separate from HTTP case creation. A detailed proposed request sequence, with per-endpoint decision flows, is in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
-### Authorization rule (proposed)
+### Authorization rule (accepted in ADR-0005)
 
 Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case:list`), and an organization:
 
@@ -74,13 +74,13 @@ Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case
 2. Obtain the actor's active membership and role in that organization from **server-owned data**, not from request claims.
 3. Check that the role grants the action. The initial demonstration matrix is deliberately narrow:
    - `service_engineer` and `service_manager` can create, read, and list cases in their own member organizations.
-   - `requester` is **proposed** (not yet accepted or implemented) to create cases only in its own member organization, with no case reading or listing until per-case requester ownership and permissions are modeled. See the [minimum role-permission policy](authorization-permissions.md).
+   - `requester` may create cases only in its own member organization (accepted in ADR-0005, not implemented). It gets no case reading or listing until per-case requester ownership and permissions are modeled. See the [minimum role-permission policy](authorization-permissions.md).
    - `platform_administrator` is **not** automatically entitled to all customer data without an explicit decision.
 4. When fetching by case ID, determine the case's actual `organization_id` and check membership. Never accept a claimed owner without verification.
 5. Restrict every SQL read to the authorized scope, for example `WHERE c.id = :case_id AND c.organization_id = :authorized_org_id`. This predicate is defense in depth **after** membership is verified, not a replacement for it.
 6. Do not expose cases or their existence outside the actor's scope. For a single case, return a generic `404` for both nonexistent and inaccessible IDs. For an explicitly requested forbidden organization listing, return `403` without rows. Both outcomes must be tested.
 
-`organization` and `case_record` are implemented. A normalized actor and organization-membership representation, and its permissions, are **proposed for the next implementation increment**. The role matrix is provisional and must be reviewed before any endpoint is exposed. The roles come from the [requirements](requirements.md#3-users-and-responsibilities), which leave exact permission rules to be specified before the affected endpoints are implemented.
+`organization` and `case_record` are implemented. A normalized actor and organization-membership representation is **proposed for the next implementation increment**. The role matrix and the enforcement architecture are **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) but **not implemented**. The roles come from the [requirements](requirements.md#3-users-and-responsibilities), which leave exact permission rules to be specified before the affected endpoints are implemented.
 
 ## 5. `POST /cases` — create a case (PLANNED)
 
@@ -125,7 +125,7 @@ Content-Type: application/json
 
 ### Retry contract (Accepted in ADR-0004; not implemented)
 
-The current `create_case()` inserts a new case on every successful call and remains non-idempotent. The rules below are the **accepted architecture** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)). They depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed), and keyed creation stays disabled until both are implemented and tested. See [Case creation semantics](case-creation-semantics.md#expected-outcomes) for the full outcomes table.
+The current `create_case()` inserts a new case on every successful call and remains non-idempotent. The rules below are the **accepted architecture** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)). They depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; not implemented), and keyed creation stays disabled until both are implemented and tested. See [Case creation semantics](case-creation-semantics.md#expected-outcomes) for the full outcomes table.
 
 - **Authorization first.** Every keyed request, including a replay, is authenticated and authorized for `case:create` **before** any key lookup. A denied or revoked actor gets `401` or `403` and cannot retrieve any stored idempotency result.
 - **Scope.** `(authorized organization_id, verified actor_id, 'case:create', exact idempotency_key)`. The same key used by another actor in the same organization, or by the same actor in another organization, is an independent operation.
@@ -234,8 +234,8 @@ All error responses use a consistent envelope, for example:
 | HTTP status | Situation | Disclosure rule |
 |---|---|---|
 | `400 Bad Request` | Malformed JSON; an `Idempotency-Key` that fails RFC 9651 String parsing, is not a String, or fails the key pattern; invalid parameter syntax | No internal details; the raw key is not echoed or logged |
-| `401 Unauthorized` | Missing, expired, or invalid credential | No other user or organization header is trusted as a fallback |
-| `403 Forbidden` | A valid actor explicitly requests an organization where they lack the required membership or permission (create or list) | No case records returned |
+| `401 Unauthorized` | Missing, expired, invalid, unknown, or revoked credential, or a credential that maps to no existing actor | No other user or organization header is trusted as a fallback |
+| `403 Forbidden` | A valid credential for an **inactive** actor; or a valid actor explicitly requests an organization (create or list) where it lacks the required membership or permission, including a nonexistent organization | No case records returned |
 | `404 Not Found` | A single-case lookup is missing or outside the actor's authorized scope | Does not disclose whether a foreign case exists |
 | `409 Conflict` | Reserved for a **future** stale-write conflict. It is not used for idempotency. | No unintended database mutation |
 | `422 Unprocessable Content` | Well-formed JSON with missing, blank, or invalid business fields, or disallowed attributes. Separately, error code `idempotency_payload_mismatch` when the same actor reuses an idempotency key in the same organization with a different request fingerprint (see [section 5](#5-post-cases--create-a-case-planned)). | Field-level messages may be returned for validation errors, without personal data. A payload mismatch returns no detail of the earlier request. |
@@ -312,7 +312,7 @@ Database-mutating tests use the dedicated `eaiso_test` database. The existing ca
 
 1. Server-controlled test identities and membership rules, with their migration and seed data.
 2. Authenticated `GET /cases/{id}` and the scoped `GET /cases` list.
-3. `POST /cases`, first with distinct-creation semantics; keyed idempotent creation only after ADR-0005 is also Accepted, both are implemented, and their tests have passed.
+3. `POST /cases`, first with distinct-creation semantics; keyed idempotent creation only after ADR-0004 and ADR-0005 (both Accepted) are implemented and their tests have passed.
 4. HTTP integration tests against `eaiso_test`.
 5. Query-plan captures before any new index.
 

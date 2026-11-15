@@ -25,7 +25,7 @@ There is also a security constraint. When two actors share an organization, neit
 ## Constraints
 
 - **PostgreSQL is authoritative** ([ADR-0001](0001-postgresql-authoritative-case-store.md)). The case and its idempotency record must commit atomically, and a database uniqueness constraint must arbitrate concurrent requests.
-- **Identity comes from ADR-0005, which is still Proposed.** This decision depends on [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) for the verified `actor.id`, the organization membership, and the authorization decision. Neither is implemented. An actor ID never comes from a request body, URL, or header.
+- **Identity comes from ADR-0005.** ADR-0005 was Proposed when this ADR was accepted; it was itself Accepted later on 2026-11-15. This decision depends on [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) for the verified `actor.id`, the organization membership, and the authorization decision. Neither is implemented. An actor ID never comes from a request body, URL, or header.
 - **Content is not identity.** Legitimate cases may share content, so title and description cannot be unique. The seed script's title-based duplicate check is setup behavior, not evidence of idempotency.
 - **Header standard.** The IETF [Idempotency-Key HTTP header field draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) (revision -08, an Internet-Draft, not a standard) defines the header as an Item Structured Header Field whose value is a String ([RFC 9651 §3.3.3](https://www.rfc-editor.org/rfc/rfc9651#section-3.3.3)).
 
@@ -92,7 +92,7 @@ There is also a security constraint. When two actors share an organization, neit
 
 **Dependency on ADR-0005.** This acceptance covers the idempotency design only. Authentication and authorization are not implemented, and keyed creation stays **disabled** until three conditions hold:
 
-- ADR-0005 is Accepted;
+- ADR-0005 is Accepted (satisfied on 2026-11-15);
 - both ADRs are implemented;
 - the tests below have passed and their results are recorded.
 
@@ -105,7 +105,7 @@ There is also a security constraint. When two actors share an organization, neit
 - **Canonicalization errors.** A serializer that deviates from RFC 8785, or a parser that accepts duplicate property names, would misclassify retries. This must be tested against RFC 8785 examples and adversarial inputs.
 - **Unbounded retention.** Records accumulate without expiry. This is acceptable only for the local demonstration.
 - **Timeouts and ambiguity.** A `503` or a lost response does not reveal the outcome. Clients must retry with the same key.
-- **Not secured yet.** Until ADR-0005 is accepted and implemented, no idempotency or tenant-isolation behavior exists or may be claimed.
+- **Not secured yet.** Until ADR-0005 (Accepted 2026-11-15) is implemented, no idempotency or tenant-isolation behavior exists or may be claimed.
 
 ## Revisit When
 
