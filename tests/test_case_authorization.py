@@ -107,6 +107,11 @@ UNREACHABLE_DSN = "postgresql://nobody:unused@127.0.0.1:1/eaiso_test"
     lambda ops: ops.get_case("cred", "{" + str(uuid4()) + "}"),
     lambda ops: ops.get_case("cred", "urn:uuid:" + str(uuid4())),
     lambda ops: ops.get_case("cred", uuid4().hex),
+    # Readiness-review regression: text that cannot be encoded as UTF-8 (a lone
+    # surrogate) must be rejected before any lock, not escape as a raw
+    # UnicodeEncodeError that carries the submitted text.
+    lambda ops: ops.create_case("cred", str(uuid4()), "lone " + chr(0xD800) + " surrogate", "d"),
+    lambda ops: ops.create_case("cred", str(uuid4()), "t", chr(0xDFFF)),
 ])
 def test_invalid_input_rejected_before_database_offline(call):
     ops = AuthorizedCaseOperations(StaticResolver({"cred": uuid4()}), UNREACHABLE_DSN)
@@ -689,6 +694,55 @@ def test_commit_failure_is_reported_as_unknown_outcome_never_success(world, monk
     assert world.snapshot()[0] == []
 
 
+@pytest.mark.db
+@pytest.mark.parametrize("phase,expected", [
+    ("write", CaseOperationUnavailable),
+    ("commit", CaseCreationOutcomeUnknown),
+])
+def test_unexpected_non_driver_error_fails_closed_with_correct_outcome(world, monkeypatch, phase, expected):
+    """Readiness-review regression: errors that are not psycopg errors are still mapped.
+
+    During the write they mean the operation did not complete (unavailable);
+    during COMMIT the outcome is unknown. Neither may escape raw, be reported as
+    success, or chain the original exception (which could carry case text).
+    """
+    real_connect = AuthorizedCaseOperations._connect
+    secret_text = "Synthetic private description 7f3a"
+
+    class Boom(RuntimeError):
+        pass
+
+    def connect_with_fault(self, *, autocommit):
+        conn = real_connect(self, autocommit=autocommit)
+        if not autocommit:
+            if phase == "commit":
+                def failing_commit():
+                    raise Boom(secret_text)
+                conn.commit = failing_commit
+            else:
+                real_execute = conn.execute
+
+                def failing_execute(query, params=None, **kw):
+                    if "INSERT INTO case_record" in str(query):
+                        raise Boom(secret_text)
+                    return real_execute(query, params, **kw)
+                conn.execute = failing_execute
+        return conn
+
+    before = world.snapshot()
+    monkeypatch.setattr(AuthorizedCaseOperations, "_connect", connect_with_fault)
+    result = outcome(world.ops.create_case, world.creds["engineer_a"], str(world.org_a),
+                     "Synthetic title", secret_text)
+    monkeypatch.undo()
+    assert type(result) is expected, result
+    assert result.__cause__ is None and result.__context__ is None
+    assert secret_text not in repr(result) and secret_text not in str(result)
+    if phase == "write":
+        assert result.reason == "internal"
+    # COMMIT was never sent in either simulation, so nothing was persisted.
+    assert world.snapshot() == before
+
+
 # =============================================================================
 # Read-side snapshot behavior (no claim of instantaneous revocation)
 # =============================================================================
@@ -709,3 +763,23 @@ def test_reads_do_not_wait_for_uncommitted_revocation_and_deny_after_commit(worl
     # After the revocation commits, new reads are denied.
     assert isinstance(outcome(world.ops.get_case, cred, str(a_case)), CaseNotFound)
     assert isinstance(outcome(world.ops.list_cases, cred, str(org)), OrganizationAccessDenied)
+
+
+def test_permission_matrix_is_read_only_at_runtime_offline():
+    """Readiness-review hardening: in-process code cannot widen the matrix."""
+    with pytest.raises(TypeError):
+        policy.ROLE_PERMISSIONS["requester"] = frozenset(policy.ACTIONS)  # type: ignore[index]
+    assert policy.permits("requester", "case:read") is False
+
+
+def test_factory_builds_the_layer_with_the_real_resolver_offline(tmp_path):
+    """Routes may import only this factory, so they cannot inject their own resolver."""
+    from src.authorized_case_operations import operations_from_environment
+
+    store = tmp_path / "credentials.json"
+    auth.write_store(store, [])
+    ops = operations_from_environment(UNREACHABLE_DSN, store)
+    assert isinstance(ops, AuthorizedCaseOperations)
+    assert type(ops._resolver) is auth.CredentialResolver
+    with pytest.raises(auth.Unauthenticated):
+        ops.get_case(auth.generate_credential(), str(uuid4()))  # unknown: no DB needed

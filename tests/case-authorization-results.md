@@ -15,6 +15,8 @@
 The full repository suite (**255 tests**: 144 offline, 111 PostgreSQL-backed) passed in three consecutive runs, and the 11 schema-integrity SQL checks passed.  
 **Execution date:** 2026-11-15
 
+> **Later evidence.** The [security-readiness validation](authorization-boundary-readiness-results.md) re-ran this suite on a fresh PostgreSQL 16 environment, fixed three low-severity layer issues, and hardened the structural check after an independent review found gaps that would matter once routes exist. The counts and checker rules below describe the original commit as recorded.
+
 This validates a **Python authorization boundary**, not an HTTP API. No HTTP route exists, no HTTP test vector has been executed, and the statuses below (`401`, `403`, `404`, `500`) are the ADR-0005 equivalents carried by typed exceptions.
 
 ## Test environment

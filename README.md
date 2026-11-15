@@ -58,6 +58,7 @@ No real customer data or private third-party project materials are used.
 - [x] Implement the actor identity schema, provider/customer role-grant eligibility guards, and trusted local provisioning — [87/87 tests passed](tests/identity-grant-integrity-results.md) (61 PostgreSQL-backed, including concurrency; 26 offline). These tables are not yet used for authorization.
 - [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary uses it yet.
 - [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). This is a Python boundary, not yet an HTTP API.
+- [x] Independently validate the integrated identity and authorization boundary before HTTP work — [security-readiness results](tests/authorization-boundary-readiness-results.md): adversarial review (no exploitable flaw found in the authorization layer; structural-check gaps fixed), fresh PostgreSQL 16 reproduction, real commit-failure and deadlock tests, and a restricted database-role assessment. Recommendation: go for local HTTP integration, with conditions.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -85,6 +86,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Local credential verification](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver) — opaque test credential format, digest store, outcomes, rotation and revocation, and limitations.
 - [Case authorization](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) — the authorized-case-operations layer, outcomes, and structural no-bypass check.
 - [Case authorization results](tests/case-authorization-results.md) — observed permission-matrix, cross-customer, revocation-concurrency, and structural-check results.
+- [Authorization boundary readiness results](tests/authorization-boundary-readiness-results.md) — independent security review, fresh-environment reproduction, credential-revocation timing, database-privilege assessment, and the HTTP readiness recommendation.
 - [Credential verification results](tests/credential-verification-results.md) — observed offline and PostgreSQL-backed results for the credential resolver.
 - [Identity and role-grant integrity results](tests/identity-grant-integrity-results.md) — observed schema, eligibility, provisioning, and concurrency test results for the identity migration.
 - [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.

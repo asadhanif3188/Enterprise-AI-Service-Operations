@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
@@ -41,7 +42,12 @@ from src.case_authorization import (
     InvalidCaseRequest,
     OrganizationAccessDenied,
 )
-from src.credential_auth import InactiveActor, Unauthenticated, VerifiedActor
+from src.credential_auth import (
+    InactiveActor,
+    Unauthenticated,
+    VerifiedActor,
+    resolver_from_environment,
+)
 
 logger = logging.getLogger("eaiso.authz")
 
@@ -79,6 +85,14 @@ def _text(value: object, name: str) -> str:
         raise InvalidCaseRequest(f"{name}_invalid_character")
     if len(value) > MAX_TEXT_LENGTH:
         raise InvalidCaseRequest(f"{name}_too_long")
+    try:
+        value.encode("utf-8")  # e.g. a lone surrogate, which the driver cannot send
+    except UnicodeEncodeError:
+        unencodable = True
+    else:
+        unencodable = False
+    if unencodable:  # raised outside the except block: no chained text-bearing error
+        raise InvalidCaseRequest(f"{name}_invalid_character")
     return value
 
 
@@ -196,6 +210,9 @@ class AuthorizedCaseOperations:
                     conn.commit()  # both row locks are held until here
         except psycopg.Error as exc:
             failure = (phase, _reason(exc))
+        except Exception:  # noqa: BLE001 - any other error still fails closed
+            # Not chained or echoed: a non-driver error could carry case text.
+            failure = (phase, "internal")
 
         if failure is not None:
             phase, reason = failure
@@ -253,6 +270,8 @@ class AuthorizedCaseOperations:
                     ).fetchone()
         except psycopg.Error as exc:
             failure = _reason(exc)
+        except Exception:  # noqa: BLE001 - fail closed without chaining
+            failure = "internal"
 
         if failure is not None:
             logger.error("authz.unavailable action=%s actor_id=%s reason=%s",
@@ -321,6 +340,8 @@ class AuthorizedCaseOperations:
                 ).fetchall()
         except psycopg.Error as exc:
             failure = _reason(exc)
+        except Exception:  # noqa: BLE001 - fail closed without chaining
+            failure = "internal"
 
         if failure is not None:
             logger.error("authz.unavailable action=%s actor_id=%s reason=%s",
@@ -337,3 +358,13 @@ class AuthorizedCaseOperations:
         logger.info("authz.allowed action=%s actor_id=%s organization_id=%s count=%d",
                     policy.CASE_LIST, actor_id, org_id, min(len(items), page_size))
         return {"items": items[:page_size], "has_more": len(items) > page_size}
+
+
+def operations_from_environment(dsn: str, store_path: Path | None = None) -> AuthorizedCaseOperations:
+    """Build the layer with the real credential resolver from server-side configuration.
+
+    This is the only construction path route modules may import (the structural
+    check forbids routes from importing the class or a resolver), so a route
+    cannot supply its own resolver and thereby choose the caller's identity.
+    """
+    return AuthorizedCaseOperations(resolver_from_environment(dsn, store_path), dsn)

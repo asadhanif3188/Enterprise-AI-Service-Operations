@@ -427,7 +427,9 @@ class CredentialResolver:
     def resolve(self, credential: object) -> VerifiedActor:
         if credential is None or credential == "":
             self._deny("missing")
-        if not is_well_formed(credential):
+        # Only an exact str: a subclass could pass the format check on its own
+        # buffer and override encode() to redirect the digest to another credential.
+        if type(credential) is not str or not is_well_formed(credential):
             self._deny("malformed")
         assert isinstance(credential, str)
         digest = credential_digest(credential)

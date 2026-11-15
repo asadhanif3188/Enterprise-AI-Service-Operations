@@ -295,24 +295,33 @@ Both row locks are held until the commit, and the representation is returned onl
 | Actor inactive, at resolution or in the layer's own check | `InactiveActor` | 403 |
 | Create or list in an organization without an active, permitting membership, including a nonexistent one | `OrganizationAccessDenied` | 403 |
 | Missing, foreign, or unreadable case | `CaseNotFound` (identical in every case) | 404 |
-| Non-canonical or malformed UUID, blank text, a NUL character, text over 10,000 characters, or an out-of-range limit (checked after authentication, before any lock) | `InvalidCaseRequest` | 400 |
-| Database unreachable, lock timeout, statement timeout, or a failure before commit | `CaseOperationUnavailable`, nothing written | 500 |
-| Failure during `COMMIT` | `CaseCreationOutcomeUnknown`, never reported as success or rollback | 500 |
+| Non-canonical or malformed UUID, blank text, a NUL character or other text that cannot be encoded as UTF-8 (such as a lone surrogate), text over 10,000 characters, or an out-of-range limit (checked after authentication, before any lock) | `InvalidCaseRequest` | 400 |
+| Database unreachable, lock timeout, statement timeout, deadlock, or any other failure before commit, including unexpected non-driver errors | `CaseOperationUnavailable`, nothing written | 500 |
+| Failure during `COMMIT`, including a real connection loss | `CaseCreationOutcomeUnknown`, never reported as success or rollback | 500 |
 
-**Structural no-bypass check.** [`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py) is run by the test suite.
+**Construction.** Route code obtains the layer only from `operations_from_environment(dsn)`, which wires the real credential resolver from server-side configuration. Routes cannot import the layer class, a resolver, the credential store, or credential-management functions, so they cannot choose the caller's identity.
 
-- **The route package `src/api/`**, where future HTTP handlers must live:
-  - may import **only** allowlisted modules: the authorized layer, the policy outcomes, the credential module, other `src.api` modules, FastAPI, Starlette, Pydantic, and the standard library minus modules that enable dynamic code, databases, sockets, or subprocesses. Every database driver, `src.case_service`, `src.identity_provisioning`, and `scripts` is therefore excluded;
-  - may not use reflection or dynamic code (`__import__`, `exec`, `eval`, `compile`, `import_module`, `getattr`/`setattr`/`delattr`, `vars`, `globals`, `locals`, `builtins`);
-  - may not access private attributes, such as the layer's internal connection or DSN;
-  - may not contain string literals naming protected tables.
-- **Elsewhere under `src/` and `scripts/`:**
-  - web frameworks may not be imported, so route handlers cannot live outside the checked package;
+**Structural no-bypass check.** [`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py) is run by the test suite. It was hardened after the [security-readiness review](../tests/authorization-boundary-readiness-results.md).
+
+- **Restricted modules:** every module under `src/` that is not in the checker's explicit trusted list. Future HTTP handlers belong in `src/api/`, but the rules apply wherever a new `src/` module is created. Trusting a new module is a reviewed change. Restricted modules:
+  - may import **only**:
+    - named outcome classes, action constants, and the layer factory from the trusted modules, never a whole trusted module;
+    - other restricted `src` modules, which are checked by the same rules;
+    - FastAPI, Starlette, Pydantic, and `typing_extensions`, minus string-import helpers (`ImportString`, `pydantic.v1`) and private submodules;
+    - a small standard-library allowlist (`typing`, `uuid`, `datetime`, `dataclasses`, `enum`, `re`, `json`, `logging`, `functools`, `time`, `http.HTTPStatus`, and a few others). `sys`, `os`, `operator`, `inspect`, `gc`, `importlib`, process, and network modules are excluded, including when reached through an allowed module (`logging.sys`, `uuid.os`);
+  - may not use reflection or dynamic code, including `getattr`, `vars`, `type`, `open`, `attrgetter`, `getattr_static`, `get_type_hints`, and string-import helpers, whether called directly or through an alias such as `m = __import__`;
+  - may not access other objects' private attributes (`obj._name`; a class's own `self._x` is allowed) or reflective dunder attributes (`__dict__`, `__class__`, `__getattribute__`, `__globals__`, and similar);
+  - may not contain string or bytes literals naming protected tables or the eligibility view as whole identifiers (a REST path such as `/case_records` is not flagged).
+- **Everywhere else in the repository** (scripts, trusted modules, and any other Python file outside `tests/` and local environments; every directory under `src/` is scanned, whatever its name):
+  - web frameworks may be imported only inside `src/api/`;
   - nothing may import `src.case_service`;
   - protected-table SQL is allowed only in an explicit allowlist of existing modules.
-- **Out of reach:** privileged SQL clients, tests, code outside those directories, SQL assembled at runtime or hidden behind views with other names, and allowlisted modules misusing their access.
+- **Fails closed:** a missing `src/` directory or an unparseable file is a violation, and the default scan root is the repository, not the working directory.
+- **Out of reach:** static analysis cannot make arbitrary Python safe. Privileged SQL clients, tests, SQL assembled at runtime, code in string annotations or format strings evaluated by libraries, the internals of allowlisted packages, and trusted modules misusing their access are not detected.
 
 **Not instantaneous revocation.** A read or list statement that started before a revocation committed completes under its snapshot. Reads take no row locks, so they do not wait for an uncommitted revocation.
+
+**Credential revocation timing (observed).** The credential is resolved once, before the database work starts, and the local credential store is not locked with the database transaction. Revoking or rotating a credential therefore stops only later resolutions: an operation already past resolution, including a create waiting inside its locked transaction, completes. Actor deactivation and membership revocation are the controls that serialize with an in-flight create through the row locks. See the [security-readiness results](../tests/authorization-boundary-readiness-results.md).
 
 ## 8. Check/use timing and revocation
 

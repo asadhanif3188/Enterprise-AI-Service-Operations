@@ -14,18 +14,22 @@ when grants are written, and adds no request-time predicate here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 CASE_CREATE = "case:create"
 CASE_READ = "case:read"
 CASE_LIST = "case:list"
 ACTIONS = frozenset({CASE_CREATE, CASE_READ, CASE_LIST})
 
 # The only roles with case permissions. Any other role, including
-# platform_administrator (which is not a membership role), has none.
-ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
+# platform_administrator (which is not a membership role), has none. Read-only,
+# so in-process code cannot widen the matrix at runtime.
+ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = MappingProxyType({
     "service_engineer": frozenset({CASE_CREATE, CASE_READ, CASE_LIST}),
     "service_manager": frozenset({CASE_CREATE, CASE_READ, CASE_LIST}),
     "requester": frozenset({CASE_CREATE}),
-}
+})
 
 
 # ----- Outcomes -----------------------------------------------------------------

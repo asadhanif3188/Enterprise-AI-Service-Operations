@@ -637,3 +637,24 @@ def test_db_cli_issue_checks_actor_and_issued_credential_resolves(db_actors, sto
     credential = capsys.readouterr().out.strip().splitlines()[-1]
     assert credential not in store_path.read_text(encoding="utf-8")
     assert db_resolver(dsn, store_path).resolve(credential).actor_id == UUID(str(actor))
+
+
+def test_str_subclass_cannot_redirect_the_digest_to_another_credential(store_path):
+    """Readiness-review regression: only an exact ``str`` is a credential.
+
+    A ``str`` subclass can pass the format check on its own buffer while
+    overriding ``encode`` so the digest is computed from another actor's
+    credential. In-process only, but identity must not depend on caller types.
+    """
+    victim, _ = auth.issue_credential(store_path, A2)
+
+    class Redirecting(str):
+        def encode(self, *args, **kwargs):
+            return str.encode(victim, *args, **kwargs)
+
+    forged = Redirecting(auth.generate_credential())
+    assert auth.is_well_formed(str(forged))
+    resolver, _ = make_resolver(store_path)
+    result = outcome(resolver, forged)
+    assert isinstance(result, auth.Unauthenticated) and result.reason == "malformed"
+    assert resolver.resolve(victim).actor_id == A2  # the real credential still works
