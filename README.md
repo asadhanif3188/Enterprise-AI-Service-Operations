@@ -59,6 +59,7 @@ No real customer data or private third-party project materials are used.
 - [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary uses it yet.
 - [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). This is a Python boundary, not yet an HTTP API.
 - [x] Independently validate the integrated identity and authorization boundary before HTTP work — [security-readiness results](tests/authorization-boundary-readiness-results.md): adversarial review (no exploitable flaw found in the authorization layer; structural-check gaps fixed), fresh PostgreSQL 16 reproduction, real commit-failure and deadlock tests, and a restricted database-role assessment. Recommendation: go for local HTTP integration, with conditions.
+- [x] Expose the authorized case operations through a localhost-only HTTP API (`POST /cases`, `GET /cases/{id}`, `GET /cases`) — [HTTP case API results](tests/http-case-api-results.md): bearer authentication, safe error envelope, and HTTP tenant-isolation tests against PostgreSQL. Keyed idempotent creation (interim `501`), cursor pagination, HTTP status transitions, and database-enforced isolation are not implemented; this is a local demonstration, not a deployable service.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -82,10 +83,11 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
 - [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
-- [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema, eligibility guards, and Python-layer authorization implemented; no HTTP API.
+- [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema, eligibility guards, Python-layer authorization, and a local HTTP API.
 - [Local credential verification](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver) — opaque test credential format, digest store, outcomes, rotation and revocation, and limitations.
 - [Case authorization](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) — the authorized-case-operations layer, outcomes, and structural no-bypass check.
 - [Case authorization results](tests/case-authorization-results.md) — observed permission-matrix, cross-customer, revocation-concurrency, and structural-check results.
+- [HTTP case API results](tests/http-case-api-results.md) — executed HTTP tests: authentication, error mapping, tenant isolation, revocation, failure behavior, and the interim idempotency and pagination rules.
 - [Authorization boundary readiness results](tests/authorization-boundary-readiness-results.md) — independent security review, fresh-environment reproduction, credential-revocation timing, database-privilege assessment, and the HTTP readiness recommendation.
 - [Credential verification results](tests/credential-verification-results.md) — observed offline and PostgreSQL-backed results for the credential resolver.
 - [Identity and role-grant integrity results](tests/identity-grant-integrity-results.md) — observed schema, eligibility, provisioning, and concurrency test results for the identity migration.
@@ -169,7 +171,7 @@ To issue a local test credential for one of those actors (the provisioning comma
 .venv\Scripts\python -m scripts.manage_test_credentials issue --actor-id <actor-uuid> --database-url postgresql://eaiso_dev:local-dev-only@127.0.0.1:5432/eaiso_dev
 ```
 
-The credential is printed **once** and is not stored anywhere; only its SHA-256 digest goes into the git-ignored `.local/test-credentials.json`. Keep it out of version control, issues, and logs. Use `rotate`, `revoke`, `remove`, and `list` with `--credential-id` to manage it. The credential identifies an actor; the [authorized case operations](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) layer uses it to authorize create, read, and list. No HTTP API exists yet ([credential details](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver)).
+The credential is printed **once** and is not stored anywhere; only its SHA-256 digest goes into the git-ignored `.local/test-credentials.json`. Keep it out of version control, issues, and logs. Use `rotate`, `revoke`, `remove`, and `list` with `--credential-id` to manage it. The credential identifies an actor; the [authorized case operations](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) layer uses it to authorize create, read, and list, and the [local HTTP API](#local-development-http-case-api) accepts it as a bearer credential ([credential details](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver)).
 
 ### 5. Verify the data
 
@@ -280,6 +282,37 @@ A successful run adds a suggestion row with the model identifier and prompt vers
 [`evaluations/model-run-01.json`](evaluations/model-run-01.json) records the requested and actual model, prompt version and instructions, synthetic input, raw model output, validated recommendation, response status, elapsed time, token usage, runtime environment, and case state before and after the write. [AI triage integration — Observed experiment](docs/ai-triage-integration.md#observed-experiment) summarizes it.
 
 One recorded run demonstrates model invocation, structured-output validation, and suggestion-only persistence. It does not establish model accuracy, a latency baseline, or tenant authorization.
+
+## Local development: HTTP case API
+
+A localhost-only FastAPI application exposes `POST /cases`, `GET /cases/{id}`, and `GET /cases` through the authorized case operations ([design](docs/authentication-authorization-sequence.md#72-implemented-local-http-api), [interim contract](docs/api-contract.md#31-implemented-interim-behavior), [results](tests/http-case-api-results.md)). It is a controlled local demonstration with synthetic data and test credentials, not a deployable service: the development database connection may be a superuser, PostgreSQL row-level security is absent, and it serves plain HTTP.
+
+1. Install the API dependencies into the Python environment from the [AI triage section](#1-create-a-python-environment):
+
+   ```powershell
+   .venv\Scripts\python -m pip install -r requirements-api.txt
+   ```
+
+2. Apply migrations 001–003, provision identities, and issue a credential as described in [step 4 above](#4-load-synthetic-development-data). The server reads `DATABASE_URL` from the environment or `.env`, and the credential store from `EAISO_CREDENTIALS_FILE` (default `.local/test-credentials.json`). Startup fails if either is missing or invalid.
+
+3. Run the server on the loopback interface only:
+
+   ```powershell
+   .venv\Scripts\python -m scripts.run_local_api          # http://127.0.0.1:8000
+   ```
+
+   The script always binds `127.0.0.1`. Do not start the application with `uvicorn --host 0.0.0.0` or behind any public ingress.
+
+4. Call it with the credential (PowerShell; replace the placeholders):
+
+   ```powershell
+   $h = @{ Authorization = "Bearer <credential>" }
+   Invoke-RestMethod -Method Post http://127.0.0.1:8000/cases -Headers $h -ContentType application/json `
+     -Body '{"organization_id": "<organization-uuid>", "title": "Synthetic VPN outage", "description": "Fictional detail"}'
+   Invoke-RestMethod "http://127.0.0.1:8000/cases?organization_id=<organization-uuid>&limit=20" -Headers $h
+   ```
+
+Interim limits: any `Idempotency-Key` header gets `501` and creates nothing (keyed creation, ADR-0004, is not implemented), so an ambiguous failure followed by a retry can create a duplicate case. Lists report `has_more` but have no cursor. There are no status-transition, approval, or administrative routes.
 
 ## Data and evidence
 

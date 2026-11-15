@@ -360,11 +360,46 @@ class AuthorizedCaseOperations:
         return {"items": items[:page_size], "has_more": len(items) > page_size}
 
 
-def operations_from_environment(dsn: str, store_path: Path | None = None) -> AuthorizedCaseOperations:
+DATABASE_URL_ENV = "DATABASE_URL"
+
+
+class OperationsConfigurationError(Exception):
+    """Mandatory server configuration is missing or invalid. Messages never echo values."""
+
+
+def _database_url_from_environment() -> str:
+    import os
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    dsn = os.environ.get(DATABASE_URL_ENV, "")
+    if not dsn.strip():
+        raise OperationsConfigurationError(f"{DATABASE_URL_ENV} is not set")
+    try:
+        params = conninfo_to_dict(dsn)
+    except Exception:  # noqa: BLE001 - the parser's message could echo the value
+        params = None
+    if not params or not params.get("dbname"):
+        raise OperationsConfigurationError(
+            f"{DATABASE_URL_ENV} is not a valid PostgreSQL connection string with a database name")
+    return dsn
+
+
+def operations_from_environment(dsn: str | None = None,
+                                store_path: Path | None = None) -> AuthorizedCaseOperations:
     """Build the layer with the real credential resolver from server-side configuration.
 
     This is the only construction path route modules may import (the structural
     check forbids routes from importing the class or a resolver), so a route
     cannot supply its own resolver and thereby choose the caller's identity.
+
+    Called without arguments (as the HTTP application does), the database URL
+    comes from the server's ``DATABASE_URL`` environment variable and the
+    credential store from ``EAISO_CREDENTIALS_FILE`` (default
+    ``.local/test-credentials.json``). Missing or invalid configuration raises
+    ``OperationsConfigurationError`` or ``CredentialConfigurationError``, so
+    startup fails instead of serving requests.
     """
+    if dsn is None:
+        dsn = _database_url_from_environment()
     return AuthorizedCaseOperations(resolver_from_environment(dsn, store_path), dsn)

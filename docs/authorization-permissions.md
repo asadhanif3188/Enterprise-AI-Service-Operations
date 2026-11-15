@@ -1,7 +1,7 @@
 # Case Authorization — Minimum Role-Permission Policy
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Implemented in a Python authorization layer; no HTTP boundary.** The policy is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). The permission matrix is in [`src/case_authorization.py`](../src/case_authorization.py), and it is enforced by the authorized-case-operations layer in [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), which resolves the caller's credential with [`src/credential_auth.py`](../src/credential_auth.py) and reads `actor` and `organization_membership`. Python-level PostgreSQL-backed tests passed ([case authorization results](../tests/case-authorization-results.md)). **No HTTP endpoint exists**, and the HTTP test vectors in section 6 have not been executed.  
+**Status:** **Implemented in a Python authorization layer and exposed through a localhost-only HTTP API** ([HTTP results](../tests/http-case-api-results.md)). The policy is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). The permission matrix is in [`src/case_authorization.py`](../src/case_authorization.py), and it is enforced by the authorized-case-operations layer in [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), which resolves the caller's credential with [`src/credential_auth.py`](../src/credential_auth.py) and reads `actor` and `organization_membership`. Python-level PostgreSQL-backed tests passed ([case authorization results](../tests/case-authorization-results.md)). **No HTTP endpoint exists**, and the HTTP test vectors in section 6 have not been executed.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
 **Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. Passing Python-layer tests are not proof of production tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
@@ -63,7 +63,7 @@ Earlier guidance listed requester creation as a *candidate*. This document propo
 - **Create:** an active requester may `case:create` only in an organization where it holds an active `requester` membership.
 - **Read and list:** the requester receives **no** `case:read` and **no** `case:list`, not even for cases it submitted.
 
-The rule is accepted as architecture and implemented in the Python layer: a requester's create succeeds, and its later read of that case gets the generic not-found outcome. No HTTP route exists.
+The rule is accepted as architecture and implemented: a requester's create succeeds (`201` over HTTP), and its later read of that case gets the generic `404`.
 
 **Rationale.** The requirements name case submission as the requester's responsibility ([§3](requirements.md#3-users-and-responsibilities), [§4 step 1](requirements.md#4-core-workflow)). Granting create therefore serves an intended business function. Reading is withheld because `case_record` has no requester-ownership relation, so an organization-wide read would expose other requesters' cases.
 
@@ -119,7 +119,7 @@ Error bodies never include foreign case data, SQL, credentials, or membership li
 
 ## 6. Proposed test vectors
 
-Every **HTTP** vector below is **proposed, not executed**: no API exists. When the HTTP boundary is implemented, each vector must assert both the HTTP response **and** the database state in the dedicated test database. Organizations A and B and all actors are fictional.
+HTTP vector statuses below refer to tests through the local API against PostgreSQL ([HTTP case API results](../tests/http-case-api-results.md)); each asserts both the HTTP response **and** the database state in the dedicated test database. Organizations A and B and all actors are fictional and created per test.
 
 **Python-layer equivalents executed** (not HTTP; outcomes are typed exceptions carrying the ADR-0005 status) are recorded in the [case authorization results](../tests/case-authorization-results.md):
 
@@ -129,28 +129,28 @@ Every **HTTP** vector below is **proposed, not executed**: no API exists. When t
 
 | ID | Verified actor and memberships | Request | Expected outcome | State assertion | Status |
 |---|---|---|---|---|---|
-| V01 | Engineer, active in A | `POST /cases` for A | Allow, `201` | Exactly one new case, owned by A | Proposed, not executed |
-| V02 | Engineer, active in A | `GET` a case owned by A | Allow, `200` | No change | Proposed, not executed |
-| V03 | Engineer, active in A | `GET /cases?organization_id=A` | Allow, `200` | Only A's cases returned | Proposed, not executed |
-| V04 | Manager, active in A | `POST` for A; list A | Allow, `201`; allow, `200` | One new case owned by A; list returns A's cases only | Proposed, not executed |
-| V05 | Requester, active in A | `POST /cases` for A | Allow, `201` | One new case owned by A | Proposed, not executed |
-| V06 | Requester, active in A | `GET` the case it just created, then another A case | `404` for both | No change | Proposed, not executed |
-| V07 | Requester, active in A | List A | Deny, `403` | No rows in the response | Proposed, not executed |
-| V08 | Engineer, active in A only | `GET` a case owned by B | Deny, `404` | Response identical to V09 | Proposed, not executed |
-| V09 | Engineer, active in A | `GET` a nonexistent UUID | `404` | Response identical to V08 | Proposed, not executed |
-| V10 | Engineer, active in A only | List B | Deny, `403` | No rows in the response | Proposed, not executed |
-| V11 | Engineer, active in A only | `POST /cases` for B | Deny, `403` | **No** `case_record` row inserted; B's case count unchanged | Proposed, not executed |
-| V12 | Mixed roles: engineer in A, requester in B | List A; list B; `POST` for B; `GET` a case owned by B | `200`; `403`; `201`; `404` | Roles evaluated per organization; one new B case; no B rows returned | Proposed, not executed |
-| V13 | Engineer, **inactive** membership in A | `GET` a case owned by A; list A | `404`; `403` | No change | Proposed, not executed |
-| V14 | **Inactive** actor, active engineer membership in A | `POST /cases` for A | Deny, `403` | No row inserted | Proposed, not executed |
-| V15 | Active actor, no membership in A | List A | Deny, `403` | No rows in the response | Proposed, not executed |
-| V16 | Policy evaluated with a role value outside the mapping (policy-level test) | `case:create` | Deny | No row inserted | Proposed, not executed |
-| V17 | Platform-administrator responsibility, no membership in A | List A; `GET` a case owned by A | `403`; `404` | No rows; no case data | Proposed, not executed |
-| V18 | No credential | `POST /cases` for A | `401` | No row inserted | Proposed, not executed |
-| V19 | Invalid credential, plus an `X-Actor-Id` header naming an engineer in A | List A | `401` | Header ignored; no rows | Proposed, not executed |
-| V20 | Valid engineer-in-A credential, plus spoofed `X-Actor-Id` and `X-Org-Id` headers pointing at B | `GET` a case owned by B; list A | `404`; `200` with A's cases only | The resolved principal and its memberships are unchanged by headers | Proposed, not executed |
-| V21 | Engineer, active in A | `GET /cases` without `organization_id` | Rejected as invalid | No rows from any organization | Proposed, not executed |
-| V22 | Engineer, active in A | Any HTTP status change for an A case | No route | `status` and `version` unchanged; not evidence of transition authorization | Proposed, not executed |
+| V01 | Engineer, active in A | `POST /cases` for A | Allow, `201` | Exactly one new case, owned by A | Passed (HTTP) |
+| V02 | Engineer, active in A | `GET` a case owned by A | Allow, `200` | No change | Passed (HTTP) |
+| V03 | Engineer, active in A | `GET /cases?organization_id=A` | Allow, `200` | Only A's cases returned | Passed (HTTP) |
+| V04 | Manager, active in A | `POST` for A; list A | Allow, `201`; allow, `200` | One new case owned by A; list returns A's cases only | Passed (HTTP) |
+| V05 | Requester, active in A | `POST /cases` for A | Allow, `201` | One new case owned by A | Passed (HTTP) |
+| V06 | Requester, active in A | `GET` the case it just created, then another A case | `404` for both | No change | Passed (HTTP) |
+| V07 | Requester, active in A | List A | Deny, `403` | No rows in the response | Passed (HTTP) |
+| V08 | Engineer, active in A only | `GET` a case owned by B | Deny, `404` | Response identical to V09 | Passed (HTTP) |
+| V09 | Engineer, active in A | `GET` a nonexistent UUID | `404` | Response identical to V08 | Passed (HTTP) |
+| V10 | Engineer, active in A only | List B | Deny, `403` | No rows in the response | Passed (HTTP) |
+| V11 | Engineer, active in A only | `POST /cases` for B | Deny, `403` | **No** `case_record` row inserted; B's case count unchanged | Passed (HTTP) |
+| V12 | Mixed roles: engineer in A, requester in B | List A; list B; `POST` for B; `GET` a case owned by B | `200`; `403`; `201`; `404` | Roles evaluated per organization; one new B case; no B rows returned | Infeasible under ADR-0006 (no actor may hold both an engineer and a requester grant); per-organization role evaluation is covered by V04/V07 and the multiple-grant test |
+| V13 | Engineer, **inactive** membership in A | `GET` a case owned by A; list A | `404`; `403` | No change | Passed (HTTP) |
+| V14 | **Inactive** actor, active engineer membership in A | `POST /cases` for A | Deny, `403` | No row inserted | Passed (HTTP) |
+| V15 | Active actor, no membership in A | List A | Deny, `403` | No rows in the response | Passed (HTTP) |
+| V16 | Policy evaluated with a role value outside the mapping (policy-level test) | `case:create` | Deny | No row inserted | Policy-level only: passed in the offline policy-matrix tests (not an HTTP test) |
+| V17 | Platform-administrator responsibility, no membership in A | List A; `GET` a case owned by A | `403`; `404` | No rows; no case data | Passed (HTTP) |
+| V18 | No credential | `POST /cases` for A | `401` | No row inserted | Passed (HTTP) |
+| V19 | Invalid credential, plus an `X-Actor-Id` header naming an engineer in A | List A | `401` | Header ignored; no rows | Passed (HTTP) |
+| V20 | Valid engineer-in-A credential, plus spoofed `X-Actor-Id` and `X-Org-Id` headers pointing at B | `GET` a case owned by B; list A | `404`; `200` with A's cases only | The resolved principal and its memberships are unchanged by headers | Passed (HTTP) |
+| V21 | Engineer, active in A | `GET /cases` without `organization_id` | Rejected as invalid | No rows from any organization | Passed (HTTP) |
+| V22 | Engineer, active in A | Any HTTP status change for an A case | No route | `status` and `version` unchanged; not evidence of transition authorization | Passed (HTTP) |
 
 ## 7. Explicitly excluded permissions
 
@@ -193,6 +193,6 @@ These are documentation-review items. A checked box means the statement was veri
 - [x] `case:read` evaluates the persisted case owner; a nonexistent case and a foreign case produce the same `404`.
 - [x] Requester create-only is presented as accepted in ADR-0005 and implemented in the Python layer, with its deferred status-viewing consequence stated.
 - [x] `platform_administrator` has no implicit cross-customer access.
-- [x] All HTTP test vectors are marked proposed and not executed, and each states a database-state assertion; Python-layer equivalents are listed separately.
+- [x] HTTP test vectors cite executed HTTP results where they ran; V12 is infeasible under ADR-0006 and V16 is a policy-level test. Python-layer equivalents are listed separately.
 - [x] Excluded permissions and open issues are recorded, not silently decided.
 - [x] Consistent with the [identity model](identity-model.md), the [API contract](api-contract.md), the [requirements](requirements.md), the [data model](data-model.md), and the [ADR register](adr/README.md#register).

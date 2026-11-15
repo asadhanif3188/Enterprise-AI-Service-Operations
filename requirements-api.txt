@@ -1,0 +1,8 @@
+# Local authenticated HTTP case API (src/api/) and its HTTP tests.
+# Install with: pip install -r requirements-api.txt
+-r requirements-ai.txt
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+# HTTP client used by fastapi.testclient.TestClient in the tests (Starlette 1.x
+# prefers httpx2; plain httpx is deprecated there).
+httpx2>=2.16,<3

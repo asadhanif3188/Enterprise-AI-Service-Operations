@@ -6,9 +6,10 @@
 - the local credential resolver ([`src/credential_auth.py`](../src/credential_auth.py); [section 5.1](#51-implemented-local-credential-resolver));
 - the authorization policy ([`src/case_authorization.py`](../src/case_authorization.py));
 - the authorized-case-operations layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [section 7.1](#71-implemented-authorized-case-operations));
-- the structural no-bypass check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py)).
+- the structural no-bypass check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py));
+- the localhost-only HTTP API ([`src/api/`](../src/api/); [section 7.2](#72-implemented-local-http-api)), with HTTP tenant-isolation tests against PostgreSQL and server-generated request IDs.
 
-**Not implemented:** an HTTP API, request logging with correlation IDs, and any HTTP tenant-isolation test.
+**Not implemented:** keyed idempotent creation (ADR-0004), cursor pagination, HTTP status transitions, production authentication, and database-enforced tenant isolation.
 
 
 **Scope:** The request-time sequence for `POST /cases`, `GET /cases/{id}`, and `GET /cases`. It describes **how** the [minimum role-permission policy](authorization-permissions.md) is to be enforced, as accepted in ADR-0005. It does not implement anything.  
@@ -37,7 +38,7 @@
 - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md): AI output and case text never confer permissions.
 - [ADR-0003](adr/0003-application-controlled-case-transitions.md): `transition_case()` must not be exposed to untrusted callers.
 - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): **Accepted** (2026-11-15) as design, **not implemented**. Its key scope is the *authorized* organization plus the *verified* actor.
-- [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Accepted** (2026-11-15). Implemented in Python except for the HTTP boundary. It records this sequence's identity, enforcement, and revocation decisions.
+- [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Accepted** (2026-11-15). Implemented in Python and exposed through the local HTTP API. It records this sequence's identity, enforcement, and revocation decisions.
 
 **Policy summary.** All rows below assume an active actor with an active membership in the organization being evaluated. Any other state is denied.
 
@@ -62,16 +63,16 @@ The client may **request** a target organization. It cannot tell the server who 
 
 ## 3. Component responsibilities
 
-These components are logical. All except the HTTP boundary and request logging now exist. They can be modules in one small Python application; they do not need to be separate services.
+These components are logical, and all of them now exist; request logging is still partial. They can be modules in one small Python application; they do not need to be separate services.
 
 | Component | Responsibility | Must not |
 |---|---|---|
-| **HTTP boundary** (PLANNED) | Parse and validate the route, headers, and body shape. Call the credential resolver. Map outcomes to HTTP responses. | Infer identity or permission from URLs, headers, or body fields. Call `src/case_service.py`, or issue SQL against case tables, directly. |
+| **HTTP boundary** (IMPLEMENTED: [`src/api/`](../src/api/), localhost only) | Parse and validate the route, headers, and body shape. Pass the raw credential to the authorized layer, which calls the resolver. Map outcomes to HTTP responses. | Infer identity or permission from URLs, headers, or body fields. Call `src/case_service.py`, or issue SQL against case tables, directly. |
 | **Credential resolver** (IMPLEMENTED: [`src/credential_auth.py`](../src/credential_auth.py)) | Verify an opaque, local, test-only credential against server-controlled configuration and return an `actor.id`. | Accept a display name, client-supplied actor ID, unverified token claims, or tenant headers as identity. |
 | **Authorization policy** (IMPLEMENTED: [`src/case_authorization.py`](../src/case_authorization.py)) | Load the actor, the membership, and the persisted case owner (for reads). Evaluate the exact permission. Return either an authorized scope or a denial. | Allow unknown actions or unknown roles, or provide an administrator bypass. |
 | **Authorized case operations**, the enforcement layer (IMPLEMENTED: [`src/authorized_case_operations.py`](../src/authorized_case_operations.py); it runs its own transactions and does not call the case service) | Be the **only** path from routes to case data. Call the policy itself. Run the operation restricted to the authorized organization. Return only the permitted fields. | Accept a raw organization or actor ID from the route as authority. |
 | **PostgreSQL** (EXISTING, including actor and membership tables) | Authoritative case data, and later actors and memberships. | Be treated as an authorization mechanism because foreign keys exist. |
-| **Request logging** (PARTLY: the layer logs decision categories and actor IDs; no correlation ID or HTTP context) | Record a correlation ID, the action, the verified actor reference, the decision, and a sanitized error category. | Log credentials or case text, or record client headers as verified identity. |
+| **Request logging** (PARTLY: the layer logs decision categories and actor IDs; the HTTP boundary logs method, path, status, and a server-generated request ID, which server errors also return. Layer log lines do not yet carry the request ID) | Record a correlation ID, the action, the verified actor reference, the decision, and a sanitized error category. | Log credentials or case text, or record client headers as verified identity. |
 
 **Which component enforces the decision?** The authorized-case-operations layer. A route hands that layer the caller's opaque credential and the request; the layer resolves the credential itself, so a route cannot supply an actor ID, and then **calls the policy itself**. A route therefore cannot perform a case operation while skipping the decision.
 
@@ -83,7 +84,7 @@ Python cannot make the lower-level functions unreachable. The rule that routes n
 sequenceDiagram
     autonumber
     participant C as Client
-    participant API as HTTP boundary (PLANNED)
+    participant API as HTTP boundary (IMPLEMENTED, localhost)
     participant AN as Credential resolver (IMPLEMENTED)
     participant OPS as Authorized case operations (IMPLEMENTED)
     participant POL as Authorization policy (IMPLEMENTED)
@@ -149,7 +150,7 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 
 **Comparison.** The presented credential is hashed with SHA-256 and the digest is looked up in the store. With 256-bit random secrets, an unsalted fast hash is sufficient: the digest cannot be reversed or brute-forced, and lookup timing can reveal at most information about digests, which does not help recover a credential. No secret-dependent string comparison is made on raw values.
 
-**Resolution order and outcomes** (`status_equivalent` is the ADR-0005 status a future HTTP boundary would return; no HTTP response exists):
+**Resolution order and outcomes** (`status_equivalent` is the ADR-0005 status; the HTTP boundary returns it, see [section 7.2](#72-implemented-local-http-api)):
 
 | Condition | Outcome | `status_equivalent` |
 |---|---|---|
@@ -169,24 +170,24 @@ The actor check is one read-only statement (`SELECT is_active FROM actor WHERE i
 
 **Logging.** Records carry only the outcome category, the non-secret `credential_id`, and the verified `actor_id`. Raw credentials and digests never appear in logs or exception messages. Dependency exceptions are not chained into authentication errors (neither `__cause__` nor `__context__`), so a driver message that echoed a secret cannot leak through an error reporter that walks the chain.
 
-**For the future HTTP boundary.** Every `Unauthenticated` reason must produce the **same** `401` response; the `reason` is for server-side logs only, so a client cannot tell an unknown credential from a revoked one.
+**At the HTTP boundary.** Every `Unauthenticated` reason produces the **same** `401` response (implemented and tested); the `reason` is for server-side logs only, so a client cannot tell an unknown credential from a revoked one.
 
 **Limitations.**
 
 - The store is a local file. Anyone who can write it, or the database, controls which actor a credential names. Owner-only permissions are applied on POSIX only, and the default path is relative to the working directory, so the resolver must be started from the repository root or given `EAISO_CREDENTIALS_FILE`.
 - A lock file left by a killed operator run blocks later writes until it is removed by hand. On Windows, a store being replaced while it is read can make one resolution fail closed (`AuthenticationUnavailable`); writers retry a refused replacement briefly.
 - There is no expiry, rate limiting, lockout, or audit trail of credential use, and no production credential management, OIDC, or SSO.
-- Bearer credentials are replayable by whoever holds them; transport security belongs to the future HTTP boundary.
+- Bearer credentials are replayable by whoever holds them. The local API serves plain HTTP on the loopback interface only; it has no TLS and is not for use beyond the local machine.
 - Authentication says nothing about authorization: an actor with no grants still authenticates.
 
 ## 6. Per-endpoint decision flows
 
-The HTTP steps of the three flows below are **PLANNED**. The authorization and SQL steps are implemented in the authorized-case-operations layer (section 7.1).
+The three flows below are implemented: the HTTP steps in [`src/api/`](../src/api/) (section 7.2), and the authorization and SQL steps in the authorized-case-operations layer (section 7.1). The step order shown is logical; the exact implemented order of request parsing and authentication is in section 7.2.
 
 ### `POST /cases` (`case:create`)
 
 1. Authenticate (`401` on failure).
-2. Validate the body. Reject unexpected fields such as `id`, `actor_id`, `role`, `status`, or `version`; they are **not silently ignored** ([API contract §5](api-contract.md#5-post-cases--create-a-case-planned)). The body's `organization_id` is an **untrusted selector**.
+2. Validate the body. Reject unexpected fields such as `id`, `actor_id`, `role`, `status`, or `version`; they are **not silently ignored** ([API contract §5](api-contract.md#5-post-cases--create-a-case-implemented-unkeyed-only)). The body's `organization_id` is an **untrusted selector**.
 3. Check that the actor is active (`403` if not).
 4. Look up the membership for `(actor, requested org)`. It must be active, and its role must grant `case:create`. Otherwise return `403` with no case data.
 
@@ -217,7 +218,7 @@ The HTTP steps of the three flows below are **PLANNED**. The authorization and S
 ### `GET /cases?organization_id=…` (`case:list`)
 
 1. Authenticate.
-2. Require a valid `organization_id` selector. If it is missing or invalid, reject the request as invalid; the `400`/`422` split is still unsettled. Never fall back to listing all organizations.
+2. Require a valid `organization_id` selector. If it is missing or invalid, reject the request as invalid (implemented as `400`). Never fall back to listing all organizations.
 3. Check that the actor is active, and that it has an active membership in the selected organization with a role granting `case:list`. Otherwise return `403` with no rows.
 4. Apply the authorized organization predicate to **every** list query, including any cursor continuation. Bound the page size. A cursor is bound to the authorized organization and can never switch tenants.
 5. Return only the list projection.
@@ -287,7 +288,7 @@ Both row locks are held until the commit, and the representation is returned onl
 
 **List.** One statement computes the actor status and the authorization decision for the selected organization. Case rows are produced only when that decision is true, and only for that organization, ordered by `(created_at, id)`. The limit defaults to 20, with a maximum of 100, and the result has a `has_more` flag. **Cursors are deferred to the HTTP increment**, so there is no cursor that could widen scope.
 
-**Outcomes** (typed exceptions carrying the ADR-0005 status; no HTTP response exists):
+**Outcomes** (typed exceptions carrying the ADR-0005 status; the HTTP mapping is in section 7.2):
 
 | Situation | Outcome | Status equivalent |
 |---|---|---|
@@ -322,6 +323,36 @@ Both row locks are held until the commit, and the representation is returned onl
 **Not instantaneous revocation.** A read or list statement that started before a revocation committed completes under its snapshot. Reads take no row locks, so they do not wait for an uncommitted revocation.
 
 **Credential revocation timing (observed).** The credential is resolved once, before the database work starts, and the local credential store is not locked with the database transaction. Revoking or rotating a credential therefore stops only later resolutions: an operation already past resolution, including a create waiting inside its locked transaction, completes. Actor deactivation and membership revocation are the controls that serialize with an in-flight create through the row locks. See the [security-readiness results](../tests/authorization-boundary-readiness-results.md).
+
+### 7.2 Implemented local HTTP API
+
+[`src/api/`](../src/api/) is a FastAPI application with exactly three routes, run on `127.0.0.1` only (`python -m scripts.run_local_api`). Observed results: [HTTP case API results](../tests/http-case-api-results.md). Interim behavior and its relation to the contract: [API contract §3.1](api-contract.md#31-implemented-interim-behavior).
+
+**Construction.** At startup the application calls `operations_from_environment()` with no arguments, so the database URL (`DATABASE_URL`) and the credential store (`EAISO_CREDENTIALS_FILE`) come only from server configuration. Missing or invalid configuration stops startup. Routes receive this one instance; they never build a resolver, accept connection details, or hold a policy.
+
+**Request processing order.** FastAPI resolves a route's dependencies in declaration order, before the route body:
+
+1. `POST /cases` only: any `Idempotency-Key` header gets `501` (`idempotency_not_implemented`); nothing else is evaluated and nothing is created.
+2. `Authorization` header **syntax**: exactly one `Bearer <token>` value, else the generic `401`. The token is not verified here.
+3. Request **syntax**: query parameters, then for `POST` the content type, JSON, and body schema (`400`, `415`, `413`, `422`).
+4. The authorized layer: **credential verification** (`401`, `403`, `500`), then **value checks** (canonical UUIDs, text, `limit` range), then authorization and the scoped operation.
+
+So the Python layer's authentication-first order holds for value checks, but **request-syntax errors are reported before the credential is verified**: a malformed body with a well-formed but invalid credential gets `400`/`415`/`422`, not `401`. Tests demonstrate both directions. Syntax errors reveal nothing about tenants, cases, or credentials.
+
+**Outcome mapping:**
+
+| Outcome | HTTP | Body `code` |
+|---|---|---|
+| Every `Unauthenticated` reason, and a missing, duplicated, or malformed `Authorization` header | `401`, `WWW-Authenticate: Bearer`, one identical body | `unauthenticated` |
+| `InactiveActor` | `403` | `actor_inactive` |
+| `OrganizationAccessDenied` (including a nonexistent organization) | `403` | `organization_access_denied` |
+| `CaseNotFound` (missing, foreign, or unreadable, including a requester's own case) | `404`, one identical body | `case_not_found` |
+| Request syntax (parameters, JSON) / path and query values after authentication | `400` | `invalid_parameter`, `missing_parameter`, `unknown_parameter`, `duplicate_parameter`, `cursor_not_supported`, `malformed_json` |
+| Body schema / body values after authentication | `422` | `invalid_request` |
+| `CaseOperationUnavailable`, `AuthenticationUnavailable`, unexpected errors | `500`, with `request_id` | `internal_error` |
+| `CaseCreationOutcomeUnknown` | `500`, with `request_id`; never `201` | `case_creation_outcome_unknown` |
+
+Error bodies contain only fixed, server-written text: no exception messages, SQL, membership details, case text, credentials, or client-supplied values. Unknown routes and methods get `404`/`405` in the same envelope.
 
 ## 8. Check/use timing and revocation
 
@@ -375,20 +406,20 @@ The contract's behavior under concurrency is **untested**. Never hold locks acro
 
 ## 10. Future negative test cases
 
-These **complement** the policy's vectors V01–V22 ([policy §6](authorization-permissions.md#6-proposed-test-vectors)) with checks specific to the sequence. As **HTTP** tests, each is **proposed, not executed**. Python-layer equivalents of S01, S02, S04, S05, S07, and S10 have been executed ([results](../tests/case-authorization-results.md)); S06 (cursors) is deferred, and S03, S08, and S09 need the HTTP boundary or ADR-0004. Each must assert both the HTTP response and the database state in the dedicated test database.
+These **complement** the policy's vectors V01–V22 ([policy §6](authorization-permissions.md#6-proposed-test-vectors)) with checks specific to the sequence. Statuses refer to **HTTP** tests through the local API against PostgreSQL ([HTTP results](../tests/http-case-api-results.md)), each asserting the response and the database state. Python-layer equivalents are in the [case authorization results](../tests/case-authorization-results.md). S08 and S09 need ADR-0004.
 
 | ID | Scenario | Expected outcome | Status |
 |---|---|---|---|
-| S01 | Valid credential mapped to an actor ID that does not exist | `401`; no case data; no insert | Proposed, not executed |
-| S02 | `POST /cases` naming a nonexistent organization, from an actor active in A | `403`, identical to a foreign organization; no insert | Proposed, not executed |
-| S03 | `POST /cases` body containing `actor_id`, `status`, or `version` | Rejected as invalid; no insert | Proposed, not executed |
-| S04 | A route attempts to reach case data without going through the authorized-operations layer | The structural check fails the build or review | Proposed, not executed |
-| S05 | Database unavailable during the policy lookup | Generic `500`; no protected operation; not `403` or `404` | Proposed, not executed |
-| S06 | List cursor issued for A, replayed with `organization_id=B` by an actor in A only | `403` or cursor rejected; no B rows | Proposed, not executed |
-| S07 | Membership or actor revoked concurrently with a write, under the accepted write-locking contract | A revocation that commits first leads to denial. An operation holding locks first completes while the revocation waits. Observed ordering recorded. | Proposed, not executed |
-| S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Proposed, not executed |
-| S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `422` mismatch about, the first requester's case | Proposed, not executed |
-| S10 | Logs after a `401`, a `403`, and a `404` | No credential value, no case text, no client header recorded as identity | Proposed, not executed |
+| S01 | Valid credential mapped to an actor ID that does not exist | `401`; no case data; no insert | Passed (HTTP) |
+| S02 | `POST /cases` naming a nonexistent organization, from an actor active in A | `403`, identical to a foreign organization; no insert | Passed (HTTP) |
+| S03 | `POST /cases` body containing `actor_id`, `status`, or `version` | Rejected as invalid; no insert | Passed (HTTP, `422`) |
+| S04 | A route attempts to reach case data without going through the authorized-operations layer | The structural check fails the build or review | Passed (structural check over `src/api/`; bypass regression tests) |
+| S05 | Database unavailable during the policy lookup | Generic `500`; no protected operation; not `403` or `404` | Passed (HTTP) |
+| S06 | List cursor issued for A, replayed with `organization_id=B` by an actor in A only | `403` or cursor rejected; no B rows | Interim: no cursor is issued, and any `cursor` parameter is rejected with `400` (HTTP-tested). Cursor scoping itself is not implemented |
+| S07 | Membership or actor revoked concurrently with a write, under the accepted write-locking contract | A revocation that commits first leads to denial. An operation holding locks first completes while the revocation waits. Observed ordering recorded. | Passed (HTTP: revocation-first; both orders at the Python layer) |
+| S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Not implemented (keyed requests get `501`) |
+| S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `422` mismatch about, the first requester's case | Not implemented (keyed requests get `501`) |
+| S10 | Logs after a `401`, a `403`, and a `404` | No credential value, no case text, no client header recorded as identity | Passed (HTTP) |
 
 ## 11. Review questions
 
@@ -434,12 +465,12 @@ This document itself accepts no ADR.
 
 These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0004, ADR-0005, and the permission policy on 2026-11-15. Executed results are recorded in the test reports linked from sections 5.1 and 7.1.
 
-- [x] Every component is labeled with its status: the HTTP boundary is PLANNED, request logging is partial, and the resolver, policy, authorized-case-operations layer, and structural check are implemented (sections 5.1 and 7.1). HTTP tests remain proposed.
+- [x] Every component is labeled with its status: the HTTP boundary (localhost only), resolver, policy, authorized-case-operations layer, and structural check are implemented (sections 5.1, 7.1, and 7.2); request logging is partial. HTTP test statuses cite executed results.
 - [x] Every allow path starts from a verified credential and requires an active actor, an active membership, and the action-specific permission.
 - [x] Create and list use an untrusted selector; get by ID uses the persisted owner. A client-supplied organization ID can only narrow access.
 - [x] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). An inactive actor gets `403`.
 - [x] Requester create-only appears as accepted in ADR-0005 and implemented in the Python layer, and neither a later read nor (by design) a replay grants read access.
 - [x] The check/use options are compared, the lock semantics are cited, and only the accepted minimum revocation contract is stated. Write-side ordering is tested at the Python layer; instantaneous revocation is not claimed.
-- [x] ADR-0004 and ADR-0005 are cited only as **accepted architectural decisions**. The executed results cited are the identity, credential, and case authorization test reports; no endpoint or HTTP test result is claimed.
+- [x] ADR-0004 and ADR-0005 are cited only as **accepted architectural decisions**. The executed results cited are the identity, credential, case authorization, and HTTP case API test reports; no keyed-creation result is claimed.
 
 **References:** [OWASP API Security Top 10 2023 — API1: Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/), [PostgreSQL 16 explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html), and [PostgreSQL 16 transaction isolation](https://www.postgresql.org/docs/16/transaction-iso.html).
