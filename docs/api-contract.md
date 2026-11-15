@@ -63,7 +63,7 @@ flowchart TD
     R -->|Suggestion only, ai_suggestion| DB
 ```
 
-**Request authority flows** from an authenticated actor, to a verified membership, to a permitted operation, to scoped database access. It never flows from a model response or an untrusted organization identifier. The planned HTTP and idempotency boundaries are labeled explicitly. The existing local triage runner, not the model adapter, persists non-authoritative suggestions, and it remains separate from HTTP case creation.
+**Request authority flows** from an authenticated actor, to a verified membership, to a permitted operation, to scoped database access. It never flows from a model response or an untrusted organization identifier. The planned HTTP and idempotency boundaries are labeled explicitly. The existing local triage runner, not the model adapter, persists non-authoritative suggestions, and it remains separate from HTTP case creation. A detailed proposed request sequence, with per-endpoint decision flows, is in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ### Authorization rule (proposed)
 

@@ -224,7 +224,7 @@ WHERE a.id = $1
   - Lock the membership row (`FOR SHARE` or `FOR KEY SHARE`) so that a concurrent revocation waits.
   - Explicitly accept that revocation applies only to requests that start after it commits.
 
-  Even a single statement sees a snapshot, so a revocation that commits during the statement does not affect it. The project must decide **when revocation takes effect**, including for in-flight requests and any cached authorization result, before claiming revocation behavior.
+  Even a single statement sees a snapshot, so a revocation that commits during the statement does not affect it. The project must decide **when revocation takes effect**, including for in-flight requests and any cached authorization result, before claiming revocation behavior. These options and their PostgreSQL lock semantics are compared in the [authentication and authorization sequence](authentication-authorization-sequence.md#8-checkuse-timing-and-revocation).
 - **Row-level security** in PostgreSQL remains optional defense in depth. It does not replace a verified actor.
 
 ## 8. Provisional permissions

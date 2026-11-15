@@ -3,7 +3,7 @@
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** **Proposed / design only.** No credential verification, `actor` or `organization_membership` table, HTTP endpoint, policy code, or authorization test exists. Nothing here has been executed.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
-**Decision boundary:** This document is a policy proposal for review. It is **not** an Accepted ADR, not an implementation, and not proof of tenant isolation. Where and how the policy is enforced belongs to a future authorization ADR.
+**Decision boundary:** This document is a policy proposal for review. It is **not** an Accepted ADR, not an implementation, and not proof of tenant isolation. Where and how the policy is enforced belongs to a future authorization ADR. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
