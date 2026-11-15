@@ -222,7 +222,7 @@ A server-generated correlation or request ID is used in logs and may be returned
 - `ai_suggestion(case_id FK, case_version, ...)` keeps zero or more non-authoritative model outputs out of the mutable case row.
 - `case_status_event(case_id FK, from_status, to_status, from_version, to_version, ...)` records transition history separately from the current case row.
 
-**Proposed identity normalization (not implemented):**
+**Proposed identity normalization (not implemented):** see the [actor and organization membership model](identity-model.md) for the detailed design.
 
 - `actor(id, ...)` represents a server-verified application principal, or an internal mapping to an identity system.
 - `organization_membership(actor_id FK, organization_id FK, role, active, ...)` associates an actor with an organization, instead of a single `actor.organization_id` or a comma-delimited list. For a single role per membership, uniqueness is enforced on `(actor_id, organization_id)`. Multiple role assignments would need a deliberately different key or schema.

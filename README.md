@@ -78,6 +78,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
 - [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
+- [Actor and organization membership model](docs/identity-model.md) — proposed normalized identity and membership design (design only; not implemented).
 - [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.
 - [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
