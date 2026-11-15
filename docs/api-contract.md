@@ -73,7 +73,7 @@ Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case
 2. Obtain the actor's active membership and role in that organization from **server-owned data**, not from request claims.
 3. Check that the role grants the action. The initial demonstration matrix is deliberately narrow:
    - `service_engineer` and `service_manager` can create, read, and list cases in their own member organizations.
-   - `requester` may be allowed to create cases, but is not granted unrestricted reading or listing until per-case requester ownership and permissions are modeled.
+   - `requester` is **proposed** (not yet accepted or implemented) to create cases only in its own member organization, with no case reading or listing until per-case requester ownership and permissions are modeled. See the [minimum role-permission policy](authorization-permissions.md).
    - `platform_administrator` is **not** automatically entitled to all customer data without an explicit decision.
 4. When fetching by case ID, determine the case's actual `organization_id` and check membership. Never accept a claimed owner without verification.
 5. Restrict every SQL read to the authorized scope, for example `WHERE c.id = :case_id AND c.organization_id = :authorized_org_id`. This predicate is defense in depth **after** membership is verified, not a replacement for it.

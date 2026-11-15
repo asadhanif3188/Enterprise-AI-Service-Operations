@@ -229,18 +229,18 @@ WHERE a.id = $1
 
 ## 8. Provisional permissions
 
-These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-proposed). They are **not** an implementation and have not been tested.
+These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-proposed). They are **not** an implementation and have not been tested. The detailed policy proposal, including predicates, HTTP outcomes, and proposed test vectors, is in [Case authorization — minimum role-permission policy](authorization-permissions.md).
 
 | Membership state and role | `case:create` | `case:read` | `case:list` | Status transition over HTTP |
 |---|---|---|---|---|
 | Active `service_engineer` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
 | Active `service_manager` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
-| Active `requester` | Candidate allow in member organization; needs review | Deny general read until per-case requester ownership is modeled | Deny | Not exposed |
+| Active `requester` | Proposed allow in member organization (create-only; [not yet accepted](authorization-permissions.md#requester-create-only-proposed-refinement)) | Deny until per-case requester ownership is modeled | Deny | Not exposed |
 | `platform_administrator` without an explicit, separately decided delegation | No implicit access | No implicit access | No implicit access | No implicit access |
 | No membership in the target organization | Deny | Deny (nondisclosing `404`) | Deny (`403`) | Deny |
 | Inactive actor, inactive membership, or unrecognized role | Deny | Deny | Deny | Deny |
 
-Every rule is scoped to one organization. Membership in organization A grants nothing in organization B. Any combination not listed is denied. Before any endpoint is exposed, the following must be reviewed: the requester creation rule, any platform-administrator exception, and the HTTP status returned to an inactive actor with a valid credential (`401` or `403`).
+Every rule is scoped to one organization. Membership in organization A grants nothing in organization B. Any combination not listed is denied. Before any endpoint is exposed, the following must be reviewed: acceptance of the proposed requester create-only rule, any platform-administrator exception, and the HTTP status returned to an inactive actor with a valid credential (`401` or `403`).
 
 ## 9. Key strategy
 
@@ -267,7 +267,7 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
   - whether membership changes need a history relation and an `updated_at` column.
 - Roles:
   - whether one role per actor per organization is enough (section 4);
-  - whether requesters may create cases;
+  - whether to accept the proposed requester create-only rule ([authorization policy](authorization-permissions.md#requester-create-only-proposed-refinement));
   - how requester-owned single-case access will be modeled.
 - Platform administrators: platform-wide administration, and any delegated access to customer data.
 - Enforcement:
