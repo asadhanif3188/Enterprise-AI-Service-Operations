@@ -43,7 +43,7 @@ For service engineers and managers, `case:read` and `case:list` cover **every ca
 | **Inactive** actor, with any membership | Deny | Deny | Deny |
 | Membership role not in the mapping below | Deny | Deny | Deny |
 | `platform_administrator` responsibility with no membership in that organization | Deny | Deny | Deny |
-| Missing, invalid, or unrecognized credential | Deny | Deny | Deny |
+| Missing, invalid, unrecognized, or revoked credential | Deny | Deny | Deny |
 
 Role-to-permission mapping (proposal, not code):
 
@@ -178,12 +178,14 @@ None of these is resolved by this document.
 
 ## 9. Design review checklist
 
-- [ ] Every permission in sections 2 and 3 uses only `case:create`, `case:read`, or `case:list`, with the role names `service_engineer`, `service_manager`, and `requester`.
-- [ ] Every allow path requires all six predicates in section 4. No path allows access based on a role name, header, display name, or supplied organization ID alone.
-- [ ] Unknown roles, inactive actors, inactive memberships, and missing memberships are always denied.
-- [ ] `case:read` evaluates the persisted case owner; a nonexistent case and a foreign case produce the same `404`.
-- [ ] Requester create-only is presented as accepted in ADR-0005, but not implemented, with its deferred status-viewing consequence stated.
-- [ ] `platform_administrator` has no implicit cross-customer access.
-- [ ] All test vectors are marked proposed and not executed, and each states a database-state assertion.
-- [ ] Excluded permissions and open issues are recorded, not silently decided.
-- [ ] Consistent with the [identity model](identity-model.md), the [API contract](api-contract.md), the [requirements](requirements.md), the [data model](data-model.md), and the [ADR register](adr/README.md#register).
+These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0005 and the linked documents on 2026-11-15. It is **not** evidence that authorization is implemented or tested.
+
+- [x] Every permission in sections 2 and 3 uses only `case:create`, `case:read`, or `case:list`, with the role names `service_engineer`, `service_manager`, and `requester`.
+- [x] Every allow path requires all six predicates in section 4. No path allows access based on a role name, header, display name, or supplied organization ID alone.
+- [x] Unknown roles, inactive actors, inactive memberships, and missing memberships are always denied.
+- [x] `case:read` evaluates the persisted case owner; a nonexistent case and a foreign case produce the same `404`.
+- [x] Requester create-only is presented as accepted in ADR-0005, but not implemented, with its deferred status-viewing consequence stated.
+- [x] `platform_administrator` has no implicit cross-customer access.
+- [x] All test vectors are marked proposed and not executed, and each states a database-state assertion.
+- [x] Excluded permissions and open issues are recorded, not silently decided.
+- [x] Consistent with the [identity model](identity-model.md), the [API contract](api-contract.md), the [requirements](requirements.md), the [data model](data-model.md), and the [ADR register](adr/README.md#register).

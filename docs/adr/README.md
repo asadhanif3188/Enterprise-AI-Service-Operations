@@ -98,11 +98,10 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 
 These topics are expected to need decisions as the project grows. They are backlog items, not accepted decisions, and have no ADR numbers yet.
 
-- Authenticated actor identity and organization membership: accepted as design in ADR-0005; production identity provider still open.
-- Server-side tenant authorization: accepted as design in ADR-0005; not implemented.
+- A production identity provider and credential lifecycle, beyond the local test credentials accepted in [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md).
 - PostgreSQL row-level security as defense in depth.
 - Human-review approval binding to a specific suggestion and case version.
-- Idempotency key retention and replay-response rules: replay rules and local-demonstration retention are accepted in ADR-0004; production retention remains open.
+- Production retention and expiry of idempotency records. Replay rules and local-demonstration retention are accepted in [ADR-0004](0004-keyed-idempotent-case-creation.md).
 - Durable background work and job recovery.
 - Analytical projection freshness and reconciliation.
 - Database audit controls and prevention of alternate writers that bypass application rules.

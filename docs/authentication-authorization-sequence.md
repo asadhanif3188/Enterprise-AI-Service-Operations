@@ -130,6 +130,8 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 
 ## 6. Per-endpoint decision flows
 
+All three flows below are **PLANNED**. They follow accepted ADR-0005, but none is implemented.
+
 ### `POST /cases` (`case:create`)
 
 1. Authenticate (`401` on failure).
@@ -199,7 +201,7 @@ These predicates are the same as [policy §4](authorization-permissions.md#4-pol
 
 | Situation | Outcome |
 |---|---|
-| Missing, invalid, or unknown bearer credential | `401`; no lookup of any client-supplied identity |
+| Missing, invalid, unknown, or revoked bearer credential, or one that maps to no existing actor | `401`; no lookup of any client-supplied identity |
 | Valid credential, inactive actor | `403`, always denied (ADR-0005) |
 | No membership, inactive membership, or role lacks the permission, on create or list | `403`, no rows, no membership details |
 | Unknown role value | Denied; treated as having no permissions |
@@ -284,7 +286,12 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
    - **List:** the selector must match an active membership with `case:list`, and every query is scoped to that organization (section 6).
 3. **What enforces the decision?** The authorized-case-operations layer, which calls the policy itself and is the only path routes use to reach case data. An automated structural check plus code review detects bypasses (section 3).
 4. **What happens on failures?** A missing membership gives `403`, or `404` for a read. A disabled actor gets `403`. An unknown role is denied. An invalid token gives `401`. An unknown case gives the generic `404`. A database outage gives a generic `500` and no protected operation (section 7).
-5. **Why does check-then-write race, and what can be done?** The decision and the write are separated in time, and statements read snapshots. The options are a combined predicate (B) or a short transaction holding `FOR SHARE` locks (C). No guarantee is chosen (section 8).
+5. **Why does check-then-write race, and what can be done?** The decision and the write are separated in time, and statements read snapshots. ADR-0005 accepts a minimum contract (section 8):
+   - **Reads and lists** use one scoped statement that contains the actor and membership predicates.
+   - **Writes** use a short READ COMMITTED transaction with **separate** `FOR SHARE` locking statements, first the actor and then the membership. The locks are held through the protected write and the commit.
+   - **Ordering.** An operation that has already taken its locks may finish before a concurrent revocation commits. A revocation that commits first is seen, and the request is denied.
+
+   Revocation of in-flight requests is **not** instantaneous. None of this is implemented, and the PostgreSQL locking behavior has **not** been exercised or tested.
 6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. This is accepted as design, but not implemented or tested (section 9).
 
 ## 12. Resolution in the authorization ADR
@@ -312,12 +319,14 @@ This document itself accepts no ADR.
 
 ## 13. Document review checklist
 
-- [ ] Every component, flow, and test is labeled PLANNED or PROPOSED (not implemented); only PostgreSQL and the case service are EXISTING.
-- [ ] Every allow path starts from a verified credential and requires an active actor, an active membership, and the action-specific permission.
-- [ ] Create and list use an untrusted selector; get by ID uses the persisted owner. A client-supplied organization ID can only narrow access.
-- [ ] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). An inactive actor gets `403`.
-- [ ] Requester create-only appears as accepted in ADR-0005 but not implemented, and neither a later GET nor a replay grants read access.
-- [ ] The check/use options are compared, the lock semantics are cited, and only the accepted minimum revocation contract is stated. Nothing is claimed as tested.
-- [ ] No migration, code, credential, fixture, ADR acceptance, or test result is claimed.
+These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0004, ADR-0005, and the permission policy on 2026-11-15. It is **not** evidence that any component is implemented or that any test has run.
+
+- [x] Every component, flow, and test is labeled PLANNED or PROPOSED (not implemented); only PostgreSQL and the case service are EXISTING.
+- [x] Every allow path starts from a verified credential and requires an active actor, an active membership, and the action-specific permission.
+- [x] Create and list use an untrusted selector; get by ID uses the persisted owner. A client-supplied organization ID can only narrow access.
+- [x] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). An inactive actor gets `403`.
+- [x] Requester create-only appears as accepted in ADR-0005 but not implemented, and neither a later GET nor a replay grants read access.
+- [x] The check/use options are compared, the lock semantics are cited, and only the accepted minimum revocation contract is stated. Nothing is claimed as tested.
+- [x] ADR-0004 and ADR-0005 are cited only as **accepted architectural decisions**. No migration, code, credential, fixture, endpoint, or executed test result is claimed, and every component and test remains marked unimplemented or unexecuted.
 
 **References:** [OWASP API Security Top 10 2023 — API1: Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/), [PostgreSQL 16 explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html), and [PostgreSQL 16 transaction isolation](https://www.postgresql.org/docs/16/transaction-iso.html).

@@ -29,7 +29,7 @@ Formalized in [ADR-0001](adr/0001-postgresql-authoritative-case-store.md).
 
 - **Authoritative state:** the application owns authoritative case data and state in PostgreSQL, and accesses it through defined business operations, not model-generated commands.
 - **Derived views:** analytical views, if introduced, cannot authorize workflow updates.
-- **Access control:** the note also made the application responsible for controlling who may read or change a case. That access control is not yet implemented, and its design is listed in the [ADR backlog](adr/README.md#future-architecture-decisions--not-yet-recorded).
+- **Access control:** the note also made the application responsible for controlling who may read or change a case. That access control is not yet implemented. Its design is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
 
 > Original rationale: "Case ownership, authorization, and status must remain consistent and auditable even when AI is unavailable."
 

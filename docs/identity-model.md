@@ -37,7 +37,10 @@ It must not add identity, role, or organization-name columns to `case_record` me
 - [Architecture context](architecture-context.md).
 - [ADR index](adr/README.md).
 
-[ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) govern authoritative state and application-controlled operations. Decisions on actor identity and tenant authorization are listed as **not yet recorded** in the [ADR backlog](adr/README.md#future-architecture-decisions--not-yet-recorded). This document informs those decisions but does not make them.
+[ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) govern authoritative state and application-controlled operations. [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15, sets the architectural direction for server-verified identity and organization-scoped authorization, and this document is one of its inputs. Acceptance is architectural only:
+
+- the `actor` and `organization_membership` model described here remains **unimplemented**;
+- no authentication or authorization mechanism has been built or validated.
 
 ## 2. Existing versus proposed entities
 
@@ -287,7 +290,7 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 
 **Nothing in this document is implemented.** No migration creates `actor` or `organization_membership`. No seed data defines actors or memberships, no credential or policy code exists, and no permission test has run. The case service still treats `organization_id` as a caller-supplied query filter. This design **does not establish tenant authorization**.
 
-A later increment, after this design is reviewed and an authorization ADR is accepted, would add:
+The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). A later implementation increment would add:
 
 - a new forward-only migration (historical migrations are never edited);
 - fictional fixtures;
@@ -296,14 +299,14 @@ A later increment, after this design is reviewed and an authorization ADR is acc
 
 ## 12. Document review checklist
 
-These are review items, not executed tests.
+These are documentation-review items, not executed tests. A checked box means the statement was verified by inspecting this document, the migrations, ADR-0005, the permission policy, and the API contract on 2026-11-15. It does **not** mean that anything is implemented.
 
-- [ ] Every mention of `actor` and `organization_membership` is labeled proposed or not implemented, and no text claims enforcement exists.
-- [ ] Column names and constraints cited for existing tables match [`db/001_init.sql`](../db/001_init.sql) and [`db/002_case_status_events.sql`](../db/002_case_status_events.sql).
-- [ ] One actor can hold independently active memberships with different roles in several organizations.
-- [ ] The composite key `(actor_id, organization_id)` is justified only by the one-role-per-organization assumption, and the consequence of dropping that assumption is stated.
-- [ ] Authentication, membership representation, and enforcement are kept distinct. `display_name` and request headers are never treated as identity.
-- [ ] A client-supplied organization ID can only narrow scope. A missing, inactive, or unrecognized membership, role, or actor is denied.
-- [ ] Requesters receive no general read or list permission, and platform administrators receive no implicit access to customer data.
-- [ ] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is marked untested.
-- [ ] Relative links resolve, and the role vocabulary matches the [API contract](api-contract.md).
+- [x] Every mention of `actor` and `organization_membership` is labeled proposed or not implemented, and no text claims enforcement exists.
+- [x] Column names and constraints cited for existing tables match [`db/001_init.sql`](../db/001_init.sql) and [`db/002_case_status_events.sql`](../db/002_case_status_events.sql).
+- [x] One actor can hold independently active memberships with different roles in several organizations.
+- [x] The composite key `(actor_id, organization_id)` is justified only by the one-role-per-organization assumption, and the consequence of dropping that assumption is stated.
+- [x] Authentication, membership representation, and enforcement are kept distinct. `display_name` and request headers are never treated as identity.
+- [x] A client-supplied organization ID can only narrow scope. A missing, inactive, or unrecognized membership, role, or actor is denied.
+- [x] Requesters receive no general read or list permission, and platform administrators receive no implicit access to customer data.
+- [x] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is marked untested.
+- [x] Relative links resolve, and the role vocabulary matches the [API contract](api-contract.md).
