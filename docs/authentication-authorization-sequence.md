@@ -1,9 +1,9 @@
 # Server-Side Authentication and Authorization Sequence
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Design only.** The architecture is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. None of the following exists: an HTTP API, credential verification, test credentials, an `actor` or `organization_membership` table, policy code, or an HTTP tenant-isolation test.  
+**Status:** **Partly implemented.** The architecture is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). Implemented: the `actor` and `organization_membership` tables ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) and the local credential resolver ([`src/credential_auth.py`](../src/credential_auth.py); [section 5.1](#51-implemented-local-credential-resolver)). **Not implemented:** an HTTP API, the authorization policy, the authorized-case-operations layer, request logging, and any HTTP tenant-isolation test.  
 **Scope:** The request-time sequence for `POST /cases`, `GET /cases/{id}`, and `GET /cases`. It describes **how** the [minimum role-permission policy](authorization-permissions.md) is to be enforced, as accepted in ADR-0005. It does not implement anything.  
-**Evidence class:** Architecture design. The diagrams, pseudocode, and test cases are proposals, not observed results.
+**Evidence class:** Architecture design, except section 5.1, which describes implemented code with recorded test results ([credential verification results](../tests/credential-verification-results.md)). The other diagrams, pseudocode, and test cases are proposals, not observed results.
 
 ## 1. Baseline
 
@@ -12,12 +12,14 @@
 - `organization`, `case_record`, and `ai_suggestion` are created by [`db/001_init.sql`](../db/001_init.sql); `case_status_event` by [`db/002_case_status_events.sql`](../db/002_case_status_events.sql).
 - [`src/case_service.py`](../src/case_service.py) filters queries by a **caller-supplied** `organization_id`. That is query scoping, not authorization.
 - The passing test `test_wrong_organization_scope_cannot_read_or_update` ([results](../tests/case-operations-results.md)) shows only that filtering. It is not evidence of authenticated tenant isolation.
+- `actor` and `organization_membership` exist, with role-grant eligibility guards ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)).
+- A local credential resolver ([`src/credential_auth.py`](../src/credential_auth.py)) verifies opaque test credentials and returns an `actor.id`, or a typed failure. Nothing calls it yet.
 - No row-level security is enabled. A foreign key proves that a referenced organization exists. It never proves that a caller is a member of it.
 
 **Design inputs:**
 
 - The [API contract](api-contract.md): endpoints and error outcomes.
-- The [identity model](identity-model.md): `actor`, and `organization_membership` keyed by `(actor_id, organization_id)`, both proposed only.
+- The [identity model](identity-model.md): `actor`, and `organization_membership` keyed by `(actor_id, organization_id)`, both implemented as schema.
 - The [permission policy](authorization-permissions.md): permissions, matrix, predicates, and test vectors V01–V22.
 
 **Governing decisions:**
@@ -51,15 +53,15 @@ The client may **request** a target organization. It cannot tell the server who 
 
 ## 3. Component responsibilities
 
-All of these components are logical and **planned**. They can be modules in one small Python application; they do not need to be separate services.
+These components are logical; only the credential resolver and the PostgreSQL tables exist so far. They can be modules in one small Python application; they do not need to be separate services.
 
 | Component | Responsibility | Must not |
 |---|---|---|
 | **HTTP boundary** (PLANNED) | Parse and validate the route, headers, and body shape. Call the credential resolver. Map outcomes to HTTP responses. | Infer identity or permission from URLs, headers, or body fields. Call `src/case_service.py`, or issue SQL against case tables, directly. |
-| **Credential resolver** (PLANNED) | Verify an opaque, local, test-only credential against server-controlled configuration and return an `actor.id`. | Accept a display name, client-supplied actor ID, unverified token claims, or tenant headers as identity. |
+| **Credential resolver** (IMPLEMENTED: [`src/credential_auth.py`](../src/credential_auth.py)) | Verify an opaque, local, test-only credential against server-controlled configuration and return an `actor.id`. | Accept a display name, client-supplied actor ID, unverified token claims, or tenant headers as identity. |
 | **Authorization policy** (PROPOSED) | Load the actor, the membership, and the persisted case owner (for reads). Evaluate the exact permission. Return either an authorized scope or a denial. | Allow unknown actions or unknown roles, or provide an administrator bypass. |
 | **Authorized case operations**, the enforcement layer (PLANNED wrapper around the EXISTING case service) | Be the **only** path from routes to case data. Call the policy itself. Run the operation restricted to the authorized organization. Return only the permitted fields. | Accept a raw organization or actor ID from the route as authority. |
-| **PostgreSQL** (EXISTING; actor and membership tables PROPOSED) | Authoritative case data, and later actors and memberships. | Be treated as an authorization mechanism because foreign keys exist. |
+| **PostgreSQL** (EXISTING, including actor and membership tables) | Authoritative case data, and later actors and memberships. | Be treated as an authorization mechanism because foreign keys exist. |
 | **Request logging** (PLANNED) | Record a correlation ID, the action, the verified actor reference, the decision, and a sanitized error category. | Log credentials or case text, or record client headers as verified identity. |
 
 **Which component enforces the decision?** The authorized-case-operations layer. A route hands that layer a verified actor and a validated request, and the layer **calls the policy itself**. A route therefore cannot perform a case operation while skipping the decision.
@@ -73,7 +75,7 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant API as HTTP boundary (PLANNED)
-    participant AN as Credential resolver (PLANNED)
+    participant AN as Credential resolver (IMPLEMENTED)
     participant OPS as Authorized case operations (PLANNED)
     participant POL as Authorization policy (PROPOSED)
     participant DB as PostgreSQL (EXISTING; actor and membership PROPOSED)
@@ -126,7 +128,47 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 - A missing, invalid, unknown, or revoked credential gets `401`. So does a credential that maps to an actor ID with no `actor` row.
 - A valid credential for an inactive actor gets `403`.
 
-**Left to implementation:** the configuration mechanism and the comparison method, for example a hashed lookup or a constant-time comparison.
+**Left to implementation:** the configuration mechanism and the comparison method, for example a hashed lookup or a constant-time comparison. Section 5.1 records the choice.
+
+### 5.1 Implemented local credential resolver
+
+[`src/credential_auth.py`](../src/credential_auth.py) implements the resolver; [`scripts/manage_test_credentials.py`](../scripts/manage_test_credentials.py) is the operator tool. Observed results are in the [credential verification results](../tests/credential-verification-results.md). It establishes **identity only**: it does not read memberships, roles, or organizations, and no HTTP route calls it yet.
+
+**Credential format.** `eaiso_test_` followed by `secrets.token_urlsafe(32)`: 256 random bits as 43 base64url characters. The prefix makes test credentials recognizable to secret scanners. Anything that is not exactly this canonical form is rejected as malformed before any lookup.
+
+**Server-controlled configuration.** A local JSON store, by default `.local/test-credentials.json` (git-ignored; override with `EAISO_CREDENTIALS_FILE`). Each entry holds a random `credential_id`, the SHA-256 digest of the credential, the `actor_id`, a status (`active` or `revoked`), and timestamps. **Raw credentials are never stored**: the operator tool prints a new credential once and keeps only its digest. The store is validated strictly (unknown keys, malformed digests or UUIDs, and duplicate digests or IDs are rejected). Writers take an exclusive lock file, so concurrent operator runs cannot lose an update or re-enable a revoked credential, and replace the file atomically, so readers see either the old or the new store.
+
+**Comparison.** The presented credential is hashed with SHA-256 and the digest is looked up in the store. With 256-bit random secrets, an unsalted fast hash is sufficient: the digest cannot be reversed or brute-forced, and lookup timing can reveal at most information about digests, which does not help recover a credential. No secret-dependent string comparison is made on raw values.
+
+**Resolution order and outcomes** (`status_equivalent` is the ADR-0005 status a future HTTP boundary would return; no HTTP response exists):
+
+| Condition | Outcome | `status_equivalent` |
+|---|---|---|
+| Missing (`None` or empty) | `Unauthenticated("missing")` | 401 |
+| Not the canonical format, including actor IDs, display names, digests, or `Bearer …` strings | `Unauthenticated("malformed")` | 401 |
+| Well-formed but not in the store | `Unauthenticated("unknown")` | 401 |
+| Mapping revoked | `Unauthenticated("revoked")` | 401 |
+| Mapping names an actor with no `actor` row | `Unauthenticated("actor_not_found")` | 401 |
+| Actor exists but `is_active = FALSE` | `InactiveActor` | 403 |
+| Store missing, unreadable, or invalid | `AuthenticationUnavailable("configuration")` | 500 |
+| Database unreachable, timed out, or erroring | `AuthenticationUnavailable("database")` | 500 |
+| Active mapping, active actor | `VerifiedActor(actor_id, credential_id)` | — |
+
+The actor check is one read-only statement (`SELECT is_active FROM actor WHERE id = …`) with bounded connect and statement time. A later authorization step must still repeat the actor predicate inside its own scoped statement or transaction (section 8).
+
+**Lifecycle.** *Revocation* marks a mapping `revoked`, or removes it. *Rotation* issues a new credential for the same `actor_id` and revokes the old one in a single atomic store write. The store is re-read on every resolution and re-parsed when its content changes, so both take effect on the next call without a restart. If the store later becomes unreadable or invalid, resolution fails closed instead of using the previous mapping.
+
+**Logging.** Records carry only the outcome category, the non-secret `credential_id`, and the verified `actor_id`. Raw credentials and digests never appear in logs or exception messages. Dependency exceptions are not chained into authentication errors (neither `__cause__` nor `__context__`), so a driver message that echoed a secret cannot leak through an error reporter that walks the chain.
+
+**For the future HTTP boundary.** Every `Unauthenticated` reason must produce the **same** `401` response; the `reason` is for server-side logs only, so a client cannot tell an unknown credential from a revoked one.
+
+**Limitations.**
+
+- The store is a local file. Anyone who can write it, or the database, controls which actor a credential names. Owner-only permissions are applied on POSIX only, and the default path is relative to the working directory, so the resolver must be started from the repository root or given `EAISO_CREDENTIALS_FILE`.
+- A lock file left by a killed operator run blocks later writes until it is removed by hand. On Windows, a store being replaced while it is read can make one resolution fail closed (`AuthenticationUnavailable`); writers retry a refused replacement briefly.
+- There is no expiry, rate limiting, lockout, or audit trail of credential use, and no production credential management, OIDC, or SSO.
+- Bearer credentials are replayable by whoever holds them; transport security belongs to the future HTTP boundary.
+- Authentication says nothing about authorization: an actor with no grants still authenticates.
 
 ## 6. Per-endpoint decision flows
 
@@ -310,7 +352,7 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
 
 Still open after acceptance:
 
-- the credential configuration and comparison mechanism;
+- ~~the credential configuration and comparison mechanism~~: implemented locally (section 5.1);
 - the structural-check mechanism;
 - row-level security and a least-privilege database role;
 - verified audit attribution.
@@ -321,12 +363,12 @@ This document itself accepts no ADR.
 
 These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0004, ADR-0005, and the permission policy on 2026-11-15. It is **not** evidence that any component is implemented or that any test has run.
 
-- [x] Every component, flow, and test is labeled PLANNED or PROPOSED (not implemented); only PostgreSQL and the case service are EXISTING.
+- [x] Every component, flow, and test is labeled PLANNED or PROPOSED (not implemented), except PostgreSQL, the case service, and the credential resolver (section 5.1), which exist.
 - [x] Every allow path starts from a verified credential and requires an active actor, an active membership, and the action-specific permission.
 - [x] Create and list use an untrusted selector; get by ID uses the persisted owner. A client-supplied organization ID can only narrow access.
 - [x] The outcomes `401`, `403`, and the identical generic `404` match the [policy](authorization-permissions.md#5-suggested-http-outcomes). An inactive actor gets `403`.
 - [x] Requester create-only appears as accepted in ADR-0005 but not implemented, and neither a later GET nor a replay grants read access.
 - [x] The check/use options are compared, the lock semantics are cited, and only the accepted minimum revocation contract is stated. Nothing is claimed as tested.
-- [x] ADR-0004 and ADR-0005 are cited only as **accepted architectural decisions**. No migration, code, credential, fixture, endpoint, or executed test result is claimed, and every component and test remains marked unimplemented or unexecuted.
+- [x] ADR-0004 and ADR-0005 are cited only as **accepted architectural decisions**. The only executed results cited are the identity and credential test reports; no endpoint, policy, or HTTP test result is claimed.
 
 **References:** [OWASP API Security Top 10 2023 — API1: Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/), [PostgreSQL 16 explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html), and [PostgreSQL 16 transaction isolation](https://www.postgresql.org/docs/16/transaction-iso.html).

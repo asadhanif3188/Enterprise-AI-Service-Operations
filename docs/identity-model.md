@@ -3,7 +3,8 @@
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** **Schema implemented; authorization not implemented.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md).
 - **Implemented:** the `actor` and `organization_membership` tables, the ADR-0006 eligibility guards, and trusted local provisioning ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py)), with PostgreSQL-backed tests that passed in a local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)).
-- **Not implemented:** credential verification, request-time authorization checks, and HTTP endpoints. Nothing in the case service reads these tables yet.
+- **Implemented separately:** local credential verification that resolves an opaque test credential to an `actor.id` ([`src/credential_auth.py`](../src/credential_auth.py); [results](../tests/credential-verification-results.md)).
+- **Not implemented:** request-time authorization checks and HTTP endpoints. Nothing in the case service reads these tables yet.
 
 
 **Scope:** The normalized data model that would let the platform represent which actors belong to which customer organizations, and in which role. Choosing an authentication provider, implementing enforcement, and recording permission-test results are out of scope.  
@@ -127,7 +128,7 @@ Implemented in migration 003 with the constraints below (named `actor_display_na
 
 Matching a request to an actor by display name, or accepting a display name from a header, would let any caller claim to be anyone. Policy code should therefore never read `display_name`; it is for display only.
 
-**What `actor` does not store.** The table holds no credentials, password hashes, tokens, email addresses, or external identity-provider subjects. The [API contract](api-contract.md#3-api-design-choices-proposed) proposes mapping a locally configured opaque test credential to an `actor.id` through server-controlled configuration that clients cannot edit. Working credentials must not be committed. Production login, token storage and rotation, identity-provider subjects, and service-to-service principals are open decisions (section 11).
+**What `actor` does not store.** The table holds no credentials, password hashes, tokens, email addresses, or external identity-provider subjects. A locally configured opaque test credential is mapped to an `actor.id` by the credential resolver, through a git-ignored store of credential digests that clients cannot edit ([authentication sequence §5.1](authentication-authorization-sequence.md#51-implemented-local-credential-resolver)). Working credentials are never committed. Production login, token storage and rotation, identity-provider subjects, and service-to-service principals are open decisions (section 11).
 
 ## 4. `organization_membership`
 
@@ -285,7 +286,7 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 - **Implemented schema:** the `actor` columns and `actor_affiliation_consistent`, and the `organization_membership` relation ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)).
 - **Implemented enforcement:** provisioning validation ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) and the PostgreSQL guards `organization_membership_role_eligible` and `actor_grants_remain_eligible` (section 10.7).
 - **Observed tests:** schema, eligibility, provisioning, and concurrency tests passed against PostgreSQL 16 in one local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)). This is not a proof of race freedom.
-- **Not implemented:** credential verification and request-time authorization (ADR-0005). Affiliation and grants are not yet read by any case operation.
+- **Not implemented:** request-time authorization (ADR-0005). Credential verification exists but consults neither affiliation nor grants, and no case operation reads them yet.
 
 - It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
 - Nothing in this section is a permission.
@@ -305,7 +306,7 @@ ABC staff investigate and resolve cases only for the customers they have been ex
 
 | Concept | Question it answers | Representation | Example | Is it authorization? |
 |---|---|---|---|---|
-| **Actor identity** | Who is performing this operation? | `actor` row (implemented); resolving it from a server-verified credential (ADR-0005) is not implemented | Ali | No. It identifies the caller and grants nothing by itself. |
+| **Actor identity** | Who is performing this operation? | `actor` row, resolved from a server-verified credential by the local credential resolver (implemented) | Ali | No. It identifies the caller and grants nothing by itself. |
 | **Organizational affiliation** | Which organization does this person belong to, in the business sense? | `actor.affiliation_type` and `actor.home_organization_id` (Option B in 10.4; implemented) | Ali works for ABC; Ahmed works for Organization A | **No.** Affiliation never grants case access. |
 | **Customer access grant** | Which customer organization may this actor access, and with which role? | `organization_membership` row (implemented) | Ali holds a `service_engineer` grant for Organization A and another for Organization B | **Yes**, together with an active actor and the role's permission (ADR-0005) |
 
@@ -496,7 +497,7 @@ Observed results, including concurrency scenarios and the remaining limitations,
 - [`src/identity_provisioning.py`](../src/identity_provisioning.py) and [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py): trusted local provisioning and the fictional scenario;
 - [`tests/test_identity_grants.py`](../tests/test_identity_grants.py): offline and PostgreSQL-backed schema, eligibility, provisioning, and concurrency tests, with results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-**Not implemented:** no credential verification or policy code exists, no permission test has run, and the case service still treats `organization_id` as a caller-supplied query filter. The new tables **do not establish tenant authorization**, and a superuser or a writer that disables triggers can bypass the guards.
+**Not implemented:** no policy code exists and no permission test has run (credential verification exists, but nothing calls it yet), and the case service still treats `organization_id` as a caller-supplied query filter. The new tables **do not establish tenant authorization**, and a superuser or a writer that disables triggers can bypass the guards.
 
 The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). Later increments would add:
 

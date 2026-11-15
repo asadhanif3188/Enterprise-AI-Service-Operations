@@ -53,7 +53,7 @@ The planned HTTP layer must not expose these functions directly without a verifi
 ```mermaid
 flowchart TD
     U[Client with test credential] --> A[HTTP API boundary — PLANNED]
-    A --> I[Resolve principal from server-controlled credential — PLANNED]
+    A --> I[Resolve principal from server-controlled credential — IMPLEMENTED as a local module]
     I --> P[Load active organization membership and role — PLANNED]
     P -->|Denied| D[Return error without case data]
     P -->|Allowed| S[Case service — EXISTING, to be wrapped]

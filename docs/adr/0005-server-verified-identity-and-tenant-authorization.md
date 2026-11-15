@@ -9,7 +9,7 @@
     - the minimum revocation contract and lock order;
     - acceptance of requester create-only.
 - **Related requirements:** FR-01, FR-02, FR-03, FR-09; rules "Organization ownership" and "Auditability"; quality requirement "Security" ([requirements](../requirements.md))
-- **Implementation evidence:** None for authentication or tenant authorization.
+- **Implementation evidence:** None for authentication or tenant authorization at acceptance (2026-11-15). As the [ADR process](README.md#accepted-is-not-implemented) requires, later implementation status is kept in living documents: see the [authentication sequence, §5.1](../authentication-authorization-sequence.md#51-implemented-local-credential-resolver) and the [identity model, §12](../identity-model.md#12-implementation-status).
   - [`src/case_service.py`](../../src/case_service.py) still filters by a caller-supplied organization ID.
   - Its [tests](../../tests/case-operations-results.md) show that query scoping, **not** authenticated tenant isolation.
 
