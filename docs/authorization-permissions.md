@@ -162,6 +162,7 @@ This policy grants none of the following. They need separate designs, and in sev
 None of these is resolved by this document.
 
 - **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. Its behavior under concurrency is untested.
+- **Role-grant eligibility.** This policy defines what a granted role may do. Who may *receive* each role, by actor affiliation, is proposed separately in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Proposed, not accepted). It adds no request-time predicate and does not change this matrix.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
 - **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design, but nothing is implemented, and requester create-only itself is still only proposed:
   - every retry is authorized for `case:create` **before** any key lookup;

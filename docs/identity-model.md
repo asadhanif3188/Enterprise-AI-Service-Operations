@@ -273,6 +273,8 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 
 **Status:** **Proposed refinement for architecture-owner review. Not implemented.**
 
+- The preferred affiliation model and the role-eligibility invariant are formally proposed in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md), which is **Proposed and not accepted**. ADR-0006 owns the decision rationale and the eligibility rules; this section explains the entities and the schema alternatives.
+
 - It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
 - Nothing here is a migration, fixture, or permission.
 - All people and organizations named below are fictional.
@@ -351,6 +353,8 @@ Those cases point to Option C, adopted through a later forward-only migration.
 
 ### 10.5 Recommendation (Proposed)
 
+This recommendation is formalized in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Proposed). Until ADR-0006 is accepted, `affiliation_type` and `home_organization_id` remain proposed attributes only.
+
 **Adopt Option B in the first identity migration**, subject to architecture-owner approval. It is the simplest model that makes the provider/customer boundary explicit and checkable without adding a party model. Option A leaves a security-relevant fact ambiguous. Option C adds complexity that the current single-provider scenario does not need.
 
 - **Persist affiliation in the first identity migration.** Add the two `actor` attributes and the `actor_affiliation_consistent` constraint above. Changing this later would require a backfill and a migration of existing actors.
@@ -398,41 +402,44 @@ Three layers must not be confused:
 | Layer | Content | Status |
 |---|---|---|
 | **1. Role permissions** | What each role may do once granted: engineer and manager create, read, and list; requester create only; no implicit platform-administrator access; an active actor and membership are required | **Accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); not implemented |
-| **2. Role eligibility** | Who may be **assigned** each role, for example:<br>• provider actors may hold `service_engineer` or `service_manager` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Proposed only, not accepted** |
-| **3. Enforcement** | Where eligibility would be checked | **Not designed or implemented** |
+| **2. Role eligibility** | Who may be **assigned** each role. The full matrix is in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md); in summary:<br>• provider actors may hold `service_engineer` or `service_manager` grants, but no `requester` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Proposed** in ADR-0006; **not accepted** |
+| **3. Enforcement** | Where eligibility would be checked | Approach **proposed** in ADR-0006: controlled provisioning, plus membership-side and actor-side database guards with actor-first locking. **Not implemented.** No constraint, trigger, provisioning validation, or eligibility test exists. |
 
-**An affiliation field does not prevent privilege escalation by itself.** Anyone able to insert an `organization_membership` row, or to change an actor's affiliation, can still grant privileges. Eligibility would have to be enforced at every path that **writes** grants or affiliation. Candidate mechanisms, none chosen:
+**An affiliation field does not prevent privilege escalation by itself.** Anyone able to insert an `organization_membership` row, or to change an actor's affiliation, can still grant privileges. Eligibility would have to be enforced at every path that **writes** grants or affiliation. The mechanisms considered are listed below. ADR-0006 proposes combining provisioning validation with trigger-based database guards and explains why it prefers triggers over the composite key; nothing is accepted or implemented.
 
 - **Server-side provisioning validation**, in the single provisioning path allowed to create or change grants, with a structural check that nothing else writes them.
 - **Database enforcement:** either a trigger on `organization_membership`, or carrying `affiliation_type` into the grant through a composite foreign key to `actor(id, affiliation_type)` plus a `CHECK` on role. The composite key is controlled redundancy that needs `ON UPDATE CASCADE`.
 - **A least-privilege database role** that cannot write grants outside the provisioning path. No such role exists today.
 
-**Materiality.** Enforcing eligibility adds a new invariant to ADR-0005's architecture. ADR-0005 decides what a granted role may do, not who may receive one. The new invariant would constrain provisioning, add data that the trust boundary depends on, and could block legitimate cases, such as an ABC engineer submitting a case on a customer's behalf. That is a **material addition** that needs its own architecture decision before enforcement is implemented, either a new ADR or an explicit amendment approved by the architecture owner. This document records the question only; ADR-0005 is unchanged.
+**Materiality.** Enforcing eligibility adds a new invariant to ADR-0005's architecture. ADR-0005 decides what a granted role may do, not who may receive one. The new invariant would constrain provisioning, add data that the trust boundary depends on, and could block legitimate cases, such as an ABC engineer submitting a case on a customer's behalf. That is a **material addition** that needs its own architecture decision before enforcement is implemented, either a new ADR or an explicit amendment approved by the architecture owner. That decision is now recorded as [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md), with status **Proposed**. ADR-0005 is unchanged and did **not** approve affiliation-based eligibility.
 
 ### 10.7 Implications for the first identity migration
 
-- **If Option B is approved:**
+- **Until ADR-0006 is accepted,** the first identity migration must **not** add the affiliation attributes or any eligibility enforcement.
+- **If ADR-0006 is accepted:**
   - `actor` gains `affiliation_type`, `home_organization_id`, and `actor_affiliation_consistent`;
   - `organization_membership` is unchanged;
   - ABC is not inserted into `organization`;
   - fictional fixtures follow the conventions in 10.3.
-- **If it is not approved:** the migration follows Option A, affiliation exists only in fixture naming, and no eligibility rule can ever be checked against stored data.
+- **If the migration proceeds before acceptance, or ADR-0006 is rejected:** the migration follows Option A, affiliation exists only in fixture naming, and no eligibility rule can ever be checked against stored data.
 - **In both cases:**
   - the ADR-0005 authorization behavior, the permission matrix, and the proposed test vectors in the [permission policy](authorization-permissions.md) are unchanged;
-  - role-eligibility enforcement is **not** part of the migration unless it is separately approved.
+  - role-eligibility enforcement is **not** part of the migration unless ADR-0006 is accepted.
 
 ### 10.8 Decisions requiring architecture-owner approval
 
-1. Persist affiliation in the first identity migration using Option B (recommended), or defer it as Option A.
-2. Keep the name `organization_membership`, or rename it before the first migration (for example, to `organization_access_grant`).
-3. Whether to adopt affiliation-based role eligibility (10.6), recorded as a new ADR or an approved amendment, and which enforcement mechanism to use.
-4. Whether ABC staff may also hold `requester` grants, for example to submit cases on a customer's behalf.
+[ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Proposed) now proposes answers to questions 1–4. They become decisions only when ADR-0006 is accepted. Questions 5 and 6 remain open.
+
+1. Persist affiliation using Option B, or defer it as Option A. *ADR-0006 proposes Option B.*
+2. Keep the name `organization_membership`, or rename it before the first migration (for example, to `organization_access_grant`). *ADR-0006 proposes keeping the name.*
+3. Whether to adopt affiliation-based role eligibility (10.6), and which enforcement mechanism to use. *ADR-0006 proposes the eligibility matrix, enforced by provisioning validation plus trigger-based guards.*
+4. Whether ABC staff may also hold `requester` grants, for example to submit cases on a customer's behalf. *ADR-0006 proposes denying them; engineers create cases through their `service_engineer` grant.*
 5. How platform administration is represented, if it ever needs permissions. ADR-0005 grants it no implicit customer access.
 6. When to move to Option C for contractors or multiple affiliations, and how service principals are modeled.
 
 ## 11. Open decisions
 
-- Affiliation and role eligibility: the six decisions in [section 10.8](#108-decisions-requiring-architecture-owner-approval).
+- Affiliation and role eligibility: the six decisions in [section 10.8](#108-decisions-requiring-architecture-owner-approval). Questions 1–4 are proposed in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Proposed, not accepted).
 - Credential verification and the actor mapping:
   - the configuration mechanism and comparison method for test credentials. The lifecycle contract, covering generation with a secure random generator, revocation, rotation that keeps the `actor.id`, and the `401`/`403` outcomes, is accepted in ADR-0005.
 - Identity sources:
@@ -484,5 +491,5 @@ These are documentation-review items, not executed tests. A checked box means th
   - keeps ABC out of the customer-tenant table, and never describes ABC staff as employees of their assigned customers;
   - presents affiliation as distinct from authorization;
   - requires an explicit grant per customer;
-  - presents affiliation-based role eligibility as proposed only, not accepted;
+  - presents affiliation-based role eligibility as proposed only (ADR-0006, Proposed), not accepted;
   - leaves the ADR-0005 permission behavior unchanged.
