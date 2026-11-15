@@ -111,6 +111,7 @@ These capabilities exist in the repository and have recorded, observed test or e
 | Handling of provider timeout, refusal, and incomplete responses; stale-case rejection; rollback on a database constraint error | [`src/model_adapter.py`](../src/model_adapter.py), [`scripts/run_triage.py`](../scripts/run_triage.py) | [Failure-path validation](../tests/ai-triage-failure-results.md): 18/18 selected tests passed |
 | One hosted-model triage request, with the suggestion stored in `ai_suggestion` and case status and version unchanged | [`scripts/run_triage.py`](../scripts/run_triage.py) | [Recorded run](../evaluations/model-run-01.json): one synthetic case, one run. It is not an evaluation of model accuracy. |
 | Forward-only, version-checked status transitions, with the status update and event insert in one transaction | [`src/case_service.py`](../src/case_service.py), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) | [Case operations validation](../tests/case-operations-results.md): 16/16 tests passed |
+| Actor identity with provider/customer affiliation, customer access grants, ADR-0006 eligibility guards (membership-side and actor-side), and trusted local provisioning with actor-first locking | [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py), [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py) | [Identity and role-grant integrity](../tests/identity-grant-integrity-results.md): 87/87 tests passed (61 PostgreSQL-backed, including concurrency; 26 offline). Not used for request authorization yet. |
 
 ### Implemented, but not production-ready
 
@@ -123,6 +124,7 @@ These components work locally within the limits below. They must not be presente
 | AI triage CLI ([`scripts/run_triage.py`](../scripts/run_triage.py)) | A local experiment over one fixed synthetic case. It makes one model call with no retry, writes one evidence file, and is not a service. See [AI triage integration](ai-triage-integration.md). |
 | Model input handling | The case ID, organization slug, title, description, status, and version are sent to the external provider. There is no redaction or data-classification control, so only synthetic data may be used. |
 | PostgreSQL | A single local Docker container with development-only credentials. There is no least-privilege application role, backup, recovery procedure, or monitoring. |
+| Identity provisioning ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) | A trusted-operator tool for local `eaiso_dev` or `eaiso_test` databases, not authenticated self-service and not an API. The eligibility guards can be bypassed by a superuser, a table owner who disables triggers, or `session_replication_role = replica`; restored data must be checked with `organization_membership_eligibility_violation`. A stored `provider` affiliation is not proof of employment. |
 | Development seed script ([`db/seed_dev.sql`](../db/seed_dev.sql)) | Skips a sample case whose title already exists for its organization. This is setup behavior for development data, not an application guarantee. |
 
 ### Planned, not implemented
@@ -132,7 +134,7 @@ These capabilities are required by the [requirements](requirements.md) or archit
 | Capability | Requirement or decision |
 |---|---|
 | Human authentication and server-side access checks | FR-02, [DEC-001](architecture-context.md#dec-001--the-application-owns-service-case-data-and-workflow-decisions) |
-| Tenant (organization) authorization | FR-02, rule "Organization ownership"; [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted design; not implemented) |
+| Tenant (organization) authorization: credential resolution, request-time membership and permission checks, and the central authorized-case-operations layer | FR-02, rule "Organization ownership"; [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; the actor and grant tables exist, enforcement is not implemented) |
 | Reviewer approval bound to a specific suggestion version, and execution of approved updates | FR-06, FR-07, [DEC-003](architecture-context.md#dec-003--only-authorized-application-operations-can-change-case-state) |
 | A public or internal application API | Required before any of the above can be offered to users |
 | Idempotent case creation | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted design; not implemented, and depends on ADR-0005); contract detailed in [Case creation semantics](case-creation-semantics.md) |
@@ -173,13 +175,13 @@ These capabilities are required by the [requirements](requirements.md) or archit
 |---|---|---|---|
 | Operator to platform | Commands, case IDs, organization IDs, actor labels, case text | Local machine access only; input validation (UUID format, nonblank text, allowed transitions, positive expected version) | Authentication, tenant authorization, verified attribution, approval |
 | Platform to model provider | Outbound: case fields and instructions. Inbound: model response. | HTTPS through the provider SDK; API key held in the git-ignored `.env`; 30-second timeout; prompt marks case text as untrusted; strict output validation; output stored only as a suggestion | Redaction and data-handling controls for real customer data; semantic accuracy of suggestions; provider availability |
-| Application code to PostgreSQL | Parameterized SQL over a local connection | Schema constraints; transactions; row locks; expected-version checks in the case service | Least-privilege roles; protection against direct writers that bypass the case service; tamper-evident history |
+| Application code to PostgreSQL | Parameterized SQL over a local connection | Schema constraints; transactions; row locks; expected-version checks in the case service; role-grant eligibility triggers on `actor` and `organization_membership` | Least-privilege roles; protection against direct writers that bypass the case service; tamper-evident history |
 
 ## 6. References
 
 **Architecture and design**
 
-- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0006 (all Accepted; ADR-0004, ADR-0005, and ADR-0006 are designs that are not yet implemented), with alternatives, consequences, and revisit conditions.
+- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0006, all Accepted, with alternatives, consequences, and revisit conditions. ADR-0004 is not implemented; ADR-0005 is implemented only in its data model (actor and grant tables); ADR-0006's schema, guards, and local provisioning are implemented.
 - [Architecture context](architecture-context.md): architecture overview, the original DEC-001 to DEC-003 notes, and the current implementation boundary.
 - [Requirements](requirements.md): functional requirements FR-01 to FR-15 and the rules that must always hold.
 - [Data model](data-model.md): entities, integrity rules, and deferred decisions.

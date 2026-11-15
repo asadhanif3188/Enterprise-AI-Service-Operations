@@ -114,7 +114,7 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 **Why knowing an actor UUID or display name is not enough:**
 
 - A UUID is an identifier, not a secret. It can appear in responses, logs, or URLs, and being hard to guess is not authentication.
-- `display_name` is not unique, not secret, and not bound to any credential ([identity model §3](identity-model.md#3-proposed-actor)).
+- `display_name` is not unique, not secret, and not bound to any credential ([identity model §3](identity-model.md#3-actor)).
 - Only possession of a credential that the server verifies yields an actor ID. Even then, the actor ID alone authorizes nothing: the active actor, the membership, the role, and the target must all still be checked.
 
 **What this is not:** production authentication, OIDC, JWT signature verification, SSO, or session management. Until real authentication is designed, the demonstration API must stay local or test-only. Credential and lookup-key values must never be logged.

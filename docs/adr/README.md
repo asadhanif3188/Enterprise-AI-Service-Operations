@@ -93,7 +93,7 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 | [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 | [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (2026-11-15; design, not implemented) | [Case creation semantics](../case-creation-semantics.md) §3 |
 | [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Accepted (2026-11-15; design, not implemented) | — |
-| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (2026-11-15; design, not implemented) | — |
+| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (2026-11-15) | — |
 
 ## Future Architecture Decisions — Not Yet Recorded
 

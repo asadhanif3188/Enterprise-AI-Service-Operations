@@ -1,14 +1,14 @@
 # Case Authorization — Minimum Role-Permission Policy
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Design only.** The policy is **accepted as architecture** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. No credential verification, `actor` or `organization_membership` table, HTTP endpoint, policy code, or authorization test exists. Nothing here has been executed.  
+**Status:** **Design only.** The policy is **accepted as architecture** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. No credential verification, HTTP endpoint, policy code, or authorization test exists, and nothing here has been executed. The `actor` and `organization_membership` tables now exist ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)), but no request reads them.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
 **Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. It is not an implementation and not proof of tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
 - **What exists:** `organization` and `case_record` are implemented ([`db/001_init.sql`](../db/001_init.sql)), and so is `case_status_event` ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)).
-- **What is only proposed:** `actor` and `organization_membership` are designed in the [identity model](identity-model.md) and have not been migrated.
+- **What exists for identity:** `actor` and `organization_membership`, with the ADR-0006 role-grant eligibility guards and trusted local provisioning ([identity model](identity-model.md), [test results](../tests/identity-grant-integrity-results.md)). They hold data only; this policy is not enforced anywhere.
 - **Current case service:** [`src/case_service.py`](../src/case_service.py) filters queries by a caller-supplied organization ID. That is query scoping, not authorization.
 - **Governing decisions:**
   - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) require application-controlled access but do not implement it.
@@ -54,7 +54,7 @@ requester        -> {case:create}
 any other value  -> {}            # unknown roles get no permissions; there is no default allow
 ```
 
-No role inherits permissions from another. A membership in one organization grants nothing in another. No superuser exception exists. `platform_administrator` is a responsibility in the [requirements](requirements.md#3-users-and-responsibilities), not a membership role ([identity model §4](identity-model.md#4-proposed-organization_membership)). It confers **no** cross-customer access.
+No role inherits permissions from another. A membership in one organization grants nothing in another. No superuser exception exists. `platform_administrator` is a responsibility in the [requirements](requirements.md#3-users-and-responsibilities), not a membership role ([identity model §4](identity-model.md#4-organization_membership)). It confers **no** cross-customer access.
 
 ### Requester: create-only (accepted in ADR-0005)
 
@@ -162,7 +162,7 @@ This policy grants none of the following. They need separate designs, and in sev
 None of these is resolved by this document.
 
 - **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. Its behavior under concurrency is untested.
-- **Role-grant eligibility.** This policy defines what a granted role may do. Who may *receive* each role, by actor affiliation, is decided separately in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Accepted; not implemented). It adds no request-time predicate and does not change this matrix.
+- **Role-grant eligibility.** This policy defines what a granted role may do. Who may *receive* each role, by actor affiliation, is decided separately in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Accepted; enforced when grants are written by database guards and provisioning). It adds no request-time predicate and does not change this matrix.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
 - **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design, but nothing is implemented, and requester create-only itself is still only proposed:
   - every retry is authorized for `case:create` **before** any key lookup;

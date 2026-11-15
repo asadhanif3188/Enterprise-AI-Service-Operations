@@ -1,9 +1,13 @@
-# Actor and Organization Membership — Proposed Relational Model
+# Actor and Organization Membership — Relational Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Proposed / design only.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md). The `actor` and `organization_membership` entities, credential verification, authorization checks, and HTTP endpoints described here are **not implemented**. No migration, fixture, policy code, or test exists for them.  
+**Status:** **Schema implemented; authorization not implemented.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md).
+- **Implemented:** the `actor` and `organization_membership` tables, the ADR-0006 eligibility guards, and trusted local provisioning ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py)), with PostgreSQL-backed tests that passed in a local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)).
+- **Not implemented:** credential verification, request-time authorization checks, and HTTP endpoints. Nothing in the case service reads these tables yet.
+
+
 **Scope:** The normalized data model that would let the platform represent which actors belong to which customer organizations, and in which role. Choosing an authentication provider, implementing enforcement, and recording permission-test results are out of scope.  
-**Evidence class:** Design only. The SQL, permission matrix, and flows below have not been executed or tested.
+**Evidence class:** Sections 3, 4, and 10 describe implemented schema and guards, verified by the recorded tests. The permission matrix, trust flow, and lookup in sections 6–8 remain design only and have not been executed.
 
 ## 1. Problem statement
 
@@ -39,10 +43,10 @@ It must not add identity, role, or organization-name columns to `case_record` me
 
 [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) govern authoritative state and application-controlled operations. [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15, sets the architectural direction for server-verified identity and organization-scoped authorization, and this document is one of its inputs. Acceptance is architectural only:
 
-- the `actor` and `organization_membership` model described here remains **unimplemented**;
+- the `actor` and `organization_membership` tables now exist (section 12), but nothing uses them to authorize a request;
 - no authentication or authorization mechanism has been built or validated.
 
-## 2. Existing versus proposed entities
+## 2. Entities
 
 | Entity | Status | Primary key | Responsibility |
 |---|---|---|---|
@@ -50,21 +54,21 @@ It must not add identity, role, or organization-name columns to `case_record` me
 | `case_record` | **Implemented** ([`db/001_init.sql`](../db/001_init.sql)) | `id UUID`; `organization_id` FK `ON DELETE RESTRICT` | Authoritative case and its owning organization |
 | `ai_suggestion` | **Implemented**, unchanged by this design | `id UUID`; `case_id` FK | Non-authoritative model output |
 | `case_status_event` | **Implemented** ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)), unchanged by this design | `id UUID`; `case_id` FK | Status-transition history with a caller-supplied `actor_label` |
-| `actor` | **Proposed, not implemented** | `id UUID` | Stable internal reference to an application principal; not a credential |
-| `organization_membership` | **Proposed, not implemented** | Composite `(actor_id, organization_id)` | One actor's role and active state in one organization |
+| `actor` | **Implemented** ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) | `id UUID` | Stable internal reference to an application principal; not a credential |
+| `organization_membership` | **Implemented** ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) | Composite `(actor_id, organization_id)` | One actor's role and active state in one organization (a customer access grant) |
 | `case_creation_idempotency` | Accepted design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), not implemented; out of scope here | — | Keyed create-request replay detection |
 
 `case_status_event.actor_label` is unverified text. Adding an `actor` table does **not** make existing or future labels verified attribution. Linking events to `actor.id` is an open decision (section 11).
 
 ### Entity relationship diagram
 
-Only `organization` and `case_record` exist today. `actor` and `organization_membership` are proposals, and each attribute comment says so.
+All four entities shown exist. `actor` and `organization_membership` were added by migration 003; nothing reads them at request time yet.
 
 ```mermaid
 erDiagram
     organization ||--o{ case_record : "owns (existing)"
-    actor ||--o{ organization_membership : "holds (proposed)"
-    organization ||--o{ organization_membership : "scopes (proposed)"
+    actor ||--o{ organization_membership : "holds"
+    organization ||--o{ organization_membership : "scopes"
 
     organization {
         uuid id PK "EXISTING"
@@ -83,27 +87,29 @@ erDiagram
         timestamptz updated_at
     }
     actor {
-        uuid id PK "PROPOSED - not implemented"
+        uuid id PK "IMPLEMENTED - migration 003"
         text display_name "synthetic label, not login proof"
         boolean is_active
         timestamptz created_at
     }
     organization_membership {
-        uuid actor_id PK, FK "PROPOSED - not implemented"
-        uuid organization_id PK, FK "PROPOSED - not implemented"
+        uuid actor_id PK, FK "IMPLEMENTED - migration 003"
+        uuid organization_id PK, FK "IMPLEMENTED - migration 003"
         text role "one role per actor and organization"
         boolean is_active
         timestamptz created_at
     }
 ```
 
-The proposed affiliation refinement (`affiliation_type`, `home_organization_id`) is not shown here. See [section 10](#10-provider-affiliation-vs-customer-access-grants).
+The affiliation attributes (`affiliation_type`, `home_organization_id`), also implemented, are not shown here. See [section 10](#10-provider-affiliation-vs-customer-access-grants).
 
 There is deliberately **no** relationship between `actor` and `case_record`. The model does not record case assignment or requester ownership. It also does not imply that every member may read every case in an organization. Assignment and requester-owned access are separate future relationships.
 
-## 3. Proposed `actor`
+## 3. `actor`
 
-| Attribute | Type | Proposed constraint | Meaning and rationale |
+Implemented in migration 003 with the constraints below (named `actor_display_name_nonblank`, `actor_affiliation_type_valid`, and `actor_affiliation_consistent`).
+
+| Attribute | Type | Constraint | Meaning and rationale |
 |---|---|---|---|
 | `id` | `uuid` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Stable internal principal reference, generated by the database like the existing keys. It is never derived from a name or credential. |
 | `display_name` | `text` | `NOT NULL`, `CHECK (BTRIM(display_name) <> '')`; **not** unique | Synthetic, human-readable label for local demonstrations and logs, for example a fictional role description. It has no other meaning. |
@@ -117,15 +123,17 @@ There is deliberately **no** relationship between `actor` and `case_record`. The
 - It is not bound to any credential.
 - It may change without changing who the actor is.
 
-**Affiliation.** Two further attributes, `affiliation_type` and `home_organization_id`, are **accepted** as design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) and described in [section 10](#10-provider-affiliation-vs-customer-access-grants). They are not implemented, and they are not authorization inputs.
+**Affiliation.** Two further attributes, `affiliation_type` and `home_organization_id`, accepted in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md), are **implemented** and described in [section 10](#10-provider-affiliation-vs-customer-access-grants). They are not authorization inputs.
 
 Matching a request to an actor by display name, or accepting a display name from a header, would let any caller claim to be anyone. Policy code should therefore never read `display_name`; it is for display only.
 
 **What `actor` does not store.** The table holds no credentials, password hashes, tokens, email addresses, or external identity-provider subjects. The [API contract](api-contract.md#3-api-design-choices-proposed) proposes mapping a locally configured opaque test credential to an `actor.id` through server-controlled configuration that clients cannot edit. Working credentials must not be committed. Production login, token storage and rotation, identity-provider subjects, and service-to-service principals are open decisions (section 11).
 
-## 4. Proposed `organization_membership`
+## 4. `organization_membership`
 
-| Attribute | Type | Proposed constraint | Meaning and rationale |
+Implemented in migration 003 (primary key `organization_membership_pkey`, role check `organization_membership_role_valid`), plus the eligibility guard described in section 10.
+
+| Attribute | Type | Constraint | Meaning and rationale |
 |---|---|---|---|
 | `actor_id` | `uuid` | `NOT NULL`, FK → `actor(id) ON DELETE RESTRICT`; part of the PK | The member. |
 | `organization_id` | `uuid` | `NOT NULL`, FK → `organization(id) ON DELETE RESTRICT`; part of the PK | The customer organization the membership applies to. Mirrors the existing `case_record.organization_id` FK behavior. |
@@ -139,7 +147,7 @@ Matching a request to an actor by display name, or accepting a display name from
 
 **`platform_administrator` is not a membership role.** The role appears in the [requirements](requirements.md#3-users-and-responsibilities) but is excluded from the `role` check. It carries **no implicit right** to read customer cases. Platform-wide administration or delegated customer access needs its own decision and must not be added as an unrestricted bypass.
 
-**Deletion and revocation semantics (proposed):**
+**Deletion and revocation semantics:**
 
 - **Revoking a membership** sets `is_active = FALSE`. The row stays, so the system can show that the relationship existed.
 - **Re-granting** reactivates the same row, because the composite key forbids a second row for the pair. Changing a role updates `role` in place.
@@ -147,9 +155,9 @@ Matching a request to an actor by display name, or accepting a display name from
   Both operations overwrite the previous state. This design keeps **no history** of role changes or of active and inactive periods, and it has no `updated_at` column. If membership changes must be auditable, as the requirements' auditability rule may demand, that needs a separate history design.
 - **Deactivating an actor** sets `actor.is_active = FALSE`. Policy then denies the actor even if its memberships are still active, and no cascade is needed.
 - **Hard-deleting an actor or organization** is blocked by `ON DELETE RESTRICT` while membership rows reference it. This matches the existing tables, where retention and offboarding are still deferred ([data model §7](data-model.md#7-deferred-decisions)).
-- **Hard-deleting a membership row** is not blocked by any FK, because nothing references the membership. Whether revocation may ever delete a row, or must always deactivate it, needs review before implementation.
+- **Hard-deleting a membership row** is not blocked by any FK, because nothing references the membership. Trusted provisioning only deactivates; it never deletes. Whether deletion should be forbidden at the database level is still open.
 
-**Indexes.** The primary key creates a unique B-tree index on `(actor_id, organization_id)`. It serves the actor-first lookup in section 7. PostgreSQL does **not** create indexes on referencing FK columns. So lookups starting from the organization, such as "list the members of an organization", or `RESTRICT` checks when deleting an organization, would scan the table without a separate index on `organization_id`. No such index is proposed yet. Add it when that query shape exists and its plan has been inspected.
+**Indexes.** The primary key creates a unique B-tree index on `(actor_id, organization_id)`. It serves the actor-first lookup in section 7. PostgreSQL does **not** create indexes on referencing FK columns. So lookups starting from the organization, such as "list the members of an organization", or `RESTRICT` checks when deleting an organization, would scan the table without a separate index on `organization_id`. Migration 003 adds no such index. Add it when that query shape exists and its plan has been inspected.
 
 ## 5. Functional dependencies and normalization
 
@@ -157,12 +165,12 @@ Matching a request to an actor by display name, or accepting a display name from
 |---|---|---|
 | `organization` (existing) | `id → name, slug, created_at`; `slug → id` | `slug` is a candidate key (`UNIQUE NOT NULL`). |
 | `case_record` (existing) | `id → organization_id, title, description, status, version, created_at, updated_at` | No actor or role attributes. |
-| `actor` (proposed) | `id → display_name, is_active, created_at` | `display_name` determines nothing. |
-| `organization_membership` (proposed) | `(actor_id, organization_id) → role, is_active, created_at` | Neither `actor_id` alone nor `organization_id` alone determines `role`. |
+| `actor` (migration 003) | `id → display_name, is_active, affiliation_type, home_organization_id, created_at` | `display_name` determines nothing. |
+| `organization_membership` (migration 003) | `(actor_id, organization_id) → role, is_active, created_at` | Neither `actor_id` alone nor `organization_id` alone determines `role`. |
 
-If the affiliation attributes proposed in [section 10](#10-provider-affiliation-vs-customer-access-grants) are approved, `actor.id → affiliation_type, home_organization_id` is added.
+The affiliation attributes from [section 10](#10-provider-affiliation-vs-customer-access-grants) add `actor.id → affiliation_type, home_organization_id`, as shown above.
 
-In each relation, every non-trivial determinant is a key, so the proposed relations are in Boyce–Codd normal form under these dependencies.
+In each relation, every non-trivial determinant is a key, so the relations are in Boyce–Codd normal form under these dependencies.
 
 **Why a multi-organization actor needs a join table.** A staff member may serve two customer organizations, with a different role in each. Several alternatives fail:
 
@@ -271,15 +279,16 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 
 ## 10. Provider Affiliation vs Customer Access Grants
 
-**Status:** **Affiliation and eligibility design accepted in ADR-0006 (2026-11-15). Not implemented.**
+**Status:** **Accepted in ADR-0006 (2026-11-15). Schema, database guards, and trusted local provisioning implemented; request-time authorization not implemented.**
 
 - **Accepted design:** the affiliation model (Option B) and the role-eligibility invariant are **accepted** in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md). ADR-0006 owns the decision rationale and the eligibility rules; this section explains the entities and the schema alternatives.
-- **Unimplemented schema:** the `actor` columns (`affiliation_type`, `home_organization_id`) and the `organization_membership` relation do not exist.
-- **Unimplemented enforcement:** no provisioning validation, eligibility trigger, or database constraint exists.
-- **Unexecuted tests:** no security or concurrency test of these rules has run.
+- **Implemented schema:** the `actor` columns and `actor_affiliation_consistent`, and the `organization_membership` relation ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)).
+- **Implemented enforcement:** provisioning validation ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) and the PostgreSQL guards `organization_membership_role_eligible` and `actor_grants_remain_eligible` (section 10.7).
+- **Observed tests:** schema, eligibility, provisioning, and concurrency tests passed against PostgreSQL 16 in one local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)). This is not a proof of race freedom.
+- **Not implemented:** credential verification and request-time authorization (ADR-0005). Affiliation and grants are not yet read by any case operation.
 
 - It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
-- Nothing here is a migration, fixture, or permission.
+- Nothing in this section is a permission.
 - All people and organizations named below are fictional.
 
 ### 10.1 Business context
@@ -296,9 +305,9 @@ ABC staff investigate and resolve cases only for the customers they have been ex
 
 | Concept | Question it answers | Representation | Example | Is it authorization? |
 |---|---|---|---|---|
-| **Actor identity** | Who is performing this operation? | Proposed `actor` row, resolved from a server-verified credential (ADR-0005) | Ali | No. It identifies the caller and grants nothing by itself. |
-| **Organizational affiliation** | Which organization does this person belong to, in the business sense? | Not modeled today; see the options in 10.4 | Ali works for ABC; Ahmed works for Organization A | **No.** Affiliation never grants case access. |
-| **Customer access grant** | Which customer organization may this actor access, and with which role? | Proposed `organization_membership` row | Ali holds a `service_engineer` grant for Organization A and another for Organization B | **Yes**, together with an active actor and the role's permission (ADR-0005) |
+| **Actor identity** | Who is performing this operation? | `actor` row (implemented); resolving it from a server-verified credential (ADR-0005) is not implemented | Ali | No. It identifies the caller and grants nothing by itself. |
+| **Organizational affiliation** | Which organization does this person belong to, in the business sense? | `actor.affiliation_type` and `actor.home_organization_id` (Option B in 10.4; implemented) | Ali works for ABC; Ahmed works for Organization A | **No.** Affiliation never grants case access. |
+| **Customer access grant** | Which customer organization may this actor access, and with which role? | `organization_membership` row (implemented) | Ali holds a `service_engineer` grant for Organization A and another for Organization B | **Yes**, together with an active actor and the role's permission (ADR-0005) |
 
 An ABC engineer can hold access grants for both customers **without being employed by either**. Affiliation and access grants are different facts and must never be used interchangeably:
 
@@ -309,7 +318,7 @@ An ABC engineer can hold access grants for both customers **without being employ
 
 ### 10.3 Illustrative actors
 
-These relationships are **illustrative only**. They are not implemented identities, fixtures, or permissions.
+These relationships are fictional. The trusted local provisioning command creates them as synthetic development data, mapping Organization A to `northwind` and B to `summit` (section 10.7). They are not credentials, and no request is authorized from them yet.
 
 | Actor | Affiliation | Responsibility | Access grants (`organization_membership` rows) | Case permissions under ADR-0005 |
 |---|---|---|---|---|
@@ -334,10 +343,10 @@ These relationships are **illustrative only**. They are not implemented identiti
 | **Can role eligibility be enforced?** | No: nothing to check against | Yes, by provisioning validation or a database mechanism (10.6) | Yes, but more joins and rules |
 | **Complexity** | Lowest | Low: two columns and one constraint | Highest: a new table, its keys and lifecycle, and possibly a party model |
 
-The Option B constraint is a **design sketch only**; it has not been executed:
+The Option B attributes as adopted. Migration 003 implements them equivalently inside `CREATE TABLE actor`, with the type check as the named constraint `actor_affiliation_type_valid`:
 
 ```sql
--- Proposed actor attributes (design sketch only, not executed)
+-- Option B actor attributes (excerpt; see db/003_actor_identity_and_grants.sql)
 affiliation_type     text NOT NULL CHECK (affiliation_type IN ('provider', 'customer')),
 home_organization_id uuid NULL REFERENCES organization(id) ON DELETE RESTRICT,
 CONSTRAINT actor_affiliation_consistent CHECK (
@@ -356,12 +365,12 @@ Those cases point to Option C, adopted through a later forward-only migration.
 
 ### 10.5 Adopted affiliation model (ADR-0006)
 
-[ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) **accepted** this model on 2026-11-15. The attributes `affiliation_type` and `home_organization_id` are accepted design and **not yet implemented**.
+[ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) **accepted** this model on 2026-11-15. Migration 003 implements `affiliation_type`, `home_organization_id`, and `actor_affiliation_consistent`.
 
 **Option B, in the first identity migration.** It is the simplest model that makes the provider/customer boundary explicit and checkable without adding a party model. Option A leaves a security-relevant fact ambiguous. Option C adds complexity that the current single-provider scenario does not need.
 
 - **Persist affiliation in the first identity migration.** Add the two `actor` attributes and the `actor_affiliation_consistent` constraint above. Changing this later would require a backfill and a migration of existing actors.
-- **Affiliation is server-managed.** It is set only by server-side provisioning (local fixtures or a future administrative path), never from an API request body, header, or credential claim. No endpoint changes it in this increment.
+- **Affiliation is server-managed.** It is set only by trusted provisioning (the local provisioning module today, a future administrative path later), never from an API request body, header, or credential claim. No endpoint changes it.
 - **Affiliation is not an authorization input.** The ADR-0005 policy is unchanged: authorization reads only `actor.is_active`, the active `organization_membership` row for the evaluated organization, and that row's role. Affiliation never grants, widens, or substitutes for an access grant.
 - **ABC staff and multiple customers.** An ABC actor (`affiliation_type = 'provider'`, `home_organization_id IS NULL`) holds one `organization_membership` row per customer it supports, each created explicitly.
 - **Customer requesters.** A customer actor has `affiliation_type = 'customer'` and `home_organization_id` set to its own organization, plus a `requester` grant for that same organization.
@@ -370,27 +379,27 @@ Those cases point to Option C, adopted through a later forward-only migration.
   - Contractors with several affiliations would move to Option C through a new migration; Option B's columns can be backfilled into the new relation.
   - Service principals, meaning non-human actors, need an actor-kind decision of their own. They are not covered by this recommendation.
 
-Proposed ER refinement (not implemented):
+ER refinement (implemented in migration 003):
 
 ```mermaid
 erDiagram
     organization ||--o{ case_record : "owns (existing)"
-    organization |o--o{ actor : "home of customer actors (proposed)"
-    actor ||--o{ organization_membership : "holds access grants (proposed)"
-    organization ||--o{ organization_membership : "grants access to (proposed)"
+    organization |o--o{ actor : "home of customer actors"
+    actor ||--o{ organization_membership : "holds access grants"
+    organization ||--o{ organization_membership : "grants access to"
 
     organization {
         uuid id PK "EXISTING - customer tenants only; ABC is not a row"
     }
     actor {
-        uuid id PK "PROPOSED - not implemented"
-        text affiliation_type "PROPOSED - provider or customer"
-        uuid home_organization_id FK "PROPOSED - null for provider staff"
+        uuid id PK "IMPLEMENTED"
+        text affiliation_type "provider or customer"
+        uuid home_organization_id FK "null for provider staff"
         boolean is_active
     }
     organization_membership {
-        uuid actor_id PK, FK "PROPOSED - customer access grant"
-        uuid organization_id PK, FK "PROPOSED - customer access grant"
+        uuid actor_id PK, FK "customer access grant"
+        uuid organization_id PK, FK "customer access grant"
         text role
         boolean is_active
     }
@@ -405,10 +414,10 @@ Three layers must not be confused:
 | Layer | Content | Status |
 |---|---|---|
 | **1. Role permissions** | What each role may do once granted: engineer and manager create, read, and list; requester create only; no implicit platform-administrator access; an active actor and membership are required | **Accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); not implemented |
-| **2. Role eligibility** | Who may be **assigned** each role. The full matrix is in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md); in summary:<br>• provider actors may hold `service_engineer` or `service_manager` grants, but no `requester` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Accepted** in ADR-0006; not implemented |
-| **3. Enforcement** | Where eligibility would be checked | Approach **accepted** in ADR-0006: controlled provisioning, plus membership-side and actor-side database guards with actor-first locking. **Not implemented.** No constraint, trigger, provisioning validation, or eligibility test exists. |
+| **2. Role eligibility** | Who may be **assigned** each role. The full matrix is in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md); in summary:<br>• provider actors may hold `service_engineer` or `service_manager` grants, but no `requester` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Accepted** in ADR-0006; **implemented** in migration 003 and provisioning; tested |
+| **3. Enforcement** | Where eligibility would be checked | Approach **accepted** in ADR-0006 and **implemented**: controlled provisioning, plus membership-side and actor-side database guards with actor-first locking. Observed test results are recorded separately. No least-privilege database role exists. |
 
-**An affiliation field does not prevent privilege escalation by itself.** Anyone able to insert an `organization_membership` row, or to change an actor's affiliation, can still grant privileges. Eligibility would have to be enforced at every path that **writes** grants or affiliation. The mechanisms considered are listed below. ADR-0006 adopts provisioning validation combined with trigger-based database guards, and explains why it prefers triggers over the composite key; nothing is implemented.
+**An affiliation field does not prevent privilege escalation by itself.** Anyone able to insert an `organization_membership` row, or to change an actor's affiliation, can still grant privileges. Eligibility would have to be enforced at every path that **writes** grants or affiliation. The mechanisms considered are listed below. ADR-0006 adopts provisioning validation combined with trigger-based database guards, and explains why it prefers triggers over the composite key. Both are now implemented (section 10.7).
 
 - **Server-side provisioning validation**, in the single provisioning path allowed to create or change grants, with a structural check that nothing else writes them.
 - **Database enforcement:** either a trigger on `organization_membership`, or carrying `affiliation_type` into the grant through a composite foreign key to `actor(id, affiliation_type)` plus a `CHECK` on role. The composite key is controlled redundancy that needs `ON UPDATE CASCADE`.
@@ -416,9 +425,9 @@ Three layers must not be confused:
 
 **Materiality.** Enforcing eligibility adds a new invariant to ADR-0005's architecture. ADR-0005 decides what a granted role may do, not who may receive one. The new invariant would constrain provisioning, add data that the trust boundary depends on, and could block legitimate cases, such as an ABC engineer submitting a case on a customer's behalf. That is a **material addition** that needs its own architecture decision before enforcement is implemented, either a new ADR or an explicit amendment approved by the architecture owner. That decision is recorded as [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md), **Accepted** on 2026-11-15. ADR-0005 is unchanged and did **not** itself approve affiliation-based eligibility.
 
-### 10.7 Implications for the first identity migration
+### 10.7 The first identity migration (implemented)
 
-**Adopted direction (ADR-0006).** The first identity migration is to include:
+**Adopted direction (ADR-0006), implemented in migration 003 and the provisioning module.** The first identity migration includes:
 
 - `actor` gains `affiliation_type`, `home_organization_id`, and `actor_affiliation_consistent`;
 - `organization_membership` is unchanged;
@@ -426,7 +435,18 @@ Three layers must not be confused:
 - fictional fixtures follow the conventions in 10.3;
 - membership-side and actor-side eligibility guards, and a controlled provisioning path, per ADR-0006.
 
-None of this exists yet. It must be shown by PostgreSQL-backed tests, including concurrency tests, before provisioning is enabled. Also:
+How the pieces behave:
+
+- **Membership-side guard** (`organization_membership_role_eligible`, `BEFORE INSERT OR UPDATE`): validates every insert, active or inactive, every change of actor, organization, or role, and every update that leaves the grant active, which includes reactivation. A pure deactivation is never blocked. It locks the actor row `FOR SHARE` before reading the affiliation; the foreign key's `FOR KEY SHARE` would not block an affiliation update.
+- **Actor-side guard** (`actor_grants_remain_eligible`, `BEFORE UPDATE` when affiliation changes): rejects the change while an incompatible **active** grant exists. It never deletes or rewrites grants.
+- **Errors:** both guards raise SQLSTATE `23514` (`check_violation`) with their own constraint names. Unknown and NULL roles are reported by the ordinary `CHECK` and `NOT NULL` constraints.
+- **Isolation:** guarded writes must run under READ COMMITTED; at higher isolation levels the guards refuse the write, because a transaction snapshot could miss a concurrently committed grant.
+- **Integrity view:** `organization_membership_eligibility_violation` lists active grants that violate the matrix, for example after a restore that bypassed the triggers. It is expected to be empty.
+- **Trusted provisioning** ([`src/identity_provisioning.py`](../src/identity_provisioning.py)): each operation is a short READ COMMITTED transaction that locks the actor `FOR NO KEY UPDATE` first, validates eligibility, then writes grants in `organization_id` order, with bounded lock and statement timeouts. Deadlocks, lock timeouts, and other database errors are raised as `ProvisioningError`, never reported as success. Grants are deactivated, never deleted.
+- **Writers that bypass the protocol.** For a direct `UPDATE`, PostgreSQL locks the membership row before the trigger locks the actor, the reverse of the provisioning order. Such a writer can deadlock with provisioning; PostgreSQL then aborts one transaction. This was observed in tests and is reported as a failure.
+- **Local command:** `python -m scripts.provision_dev_identities` creates the section 10.3 scenario in a local `eaiso_dev` or `eaiso_test` database only. It is a trusted-operator tool, not authenticated self-service. Rerunning is safe: matching actors and grants are left unchanged, and any difference stops the run instead of being overwritten.
+
+Observed results, including concurrency scenarios and the remaining limitations, are in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md). Also:
 
 - the ADR-0005 authorization behavior, the permission matrix, and the proposed test vectors in the [permission policy](authorization-permissions.md) are unchanged;
 - eligibility applies only when grants are written; it adds no request-time predicate.
@@ -437,7 +457,7 @@ None of this exists yet. It must be shown by PostgreSQL-backed tests, including 
 
 1. Persist affiliation using Option B, or defer it as Option A. *Decided: Option B.*
 2. Keep the name `organization_membership`, or rename it before the first migration (for example, to `organization_access_grant`). *Decided: keep the name.*
-3. Whether to adopt affiliation-based role eligibility (10.6), and which enforcement mechanism to use. *Decided: the eligibility matrix, enforced by provisioning validation plus trigger-based guards (not implemented).*
+3. Whether to adopt affiliation-based role eligibility (10.6), and which enforcement mechanism to use. *Decided: the eligibility matrix, enforced by provisioning validation plus trigger-based guards (implemented in migration 003 and the provisioning module).*
 4. Whether ABC staff may also hold `requester` grants, for example to submit cases on a customer's behalf. *Decided: denied; engineers create cases through their `service_engineer` grant.*
 5. How platform administration is represented, if it ever needs permissions. ADR-0005 grants it no implicit customer access.
 6. When to move to Option C for contractors or multiple affiliations, and how service principals are modeled.
@@ -451,8 +471,8 @@ None of this exists yet. It must be shown by PostgreSQL-backed tests, including 
   - how `actor` relates to future identity-provider subjects;
   - how service-to-service principals are represented.
 - Membership changes:
-  - verification under concurrency of the minimum revocation contract accepted in ADR-0005 (section 7);
-  - whether revocation may hard-delete a membership row;
+  - verification of the full request-time revocation contract accepted in ADR-0005 (section 7) once request-time authorization exists. A provisioning-side test shows revocation waiting for in-flight `FOR SHARE` locks;
+  - whether hard deletion of a membership row should be forbidden at the database level (provisioning only deactivates);
   - whether membership changes need a history relation and an `updated_at` column.
 - Roles:
   - whether one role per actor per organization is enough (section 4);
@@ -470,21 +490,26 @@ None of this exists yet. It must be shown by PostgreSQL-backed tests, including 
 
 ## 12. Implementation status
 
-**Nothing in this document is implemented.** No migration creates `actor` or `organization_membership`, and the accepted affiliation attributes and eligibility guards (section 10, ADR-0006) do not exist. No seed data defines actors or memberships, no credential or policy code exists, and no permission test has run. The case service still treats `organization_id` as a caller-supplied query filter. This design **does not establish tenant authorization**.
+**Implemented:**
 
-The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). A later implementation increment would add:
+- [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql): `actor` (with affiliation), `organization_membership`, the eligibility function, both guards, and the integrity view;
+- [`src/identity_provisioning.py`](../src/identity_provisioning.py) and [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py): trusted local provisioning and the fictional scenario;
+- [`tests/test_identity_grants.py`](../tests/test_identity_grants.py): offline and PostgreSQL-backed schema, eligibility, provisioning, and concurrency tests, with results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-- a new forward-only migration (historical migrations are never edited);
-- fictional fixtures;
-- server-side policy code;
-- HTTP integration tests with observed results.
+**Not implemented:** no credential verification or policy code exists, no permission test has run, and the case service still treats `organization_id` as a caller-supplied query filter. The new tables **do not establish tenant authorization**, and a superuser or a writer that disables triggers can bypass the guards.
+
+The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). Later increments would add:
+
+- server-side credential resolution and policy code;
+- HTTP integration tests with observed results;
+- any further schema as new forward-only migrations (historical migrations are never edited).
 
 ## 13. Document review checklist
 
-These are documentation-review items, not executed tests. A checked box means the statement was verified by inspecting this document, the migrations, ADR-0005, ADR-0006, the permission policy, and the API contract on 2026-11-15. It does **not** mean that anything is implemented.
+These are documentation-review items, not executed tests. A checked box means the statement was verified by inspecting this document, the migrations, ADR-0005, ADR-0006, the permission policy, and the API contract on 2026-11-15. Executed test results are recorded separately in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-- [x] Every mention of `actor` and `organization_membership` is labeled proposed or not implemented, and no text claims enforcement exists.
-- [x] Column names and constraints cited for existing tables match [`db/001_init.sql`](../db/001_init.sql) and [`db/002_case_status_events.sql`](../db/002_case_status_events.sql).
+- [x] `actor` and `organization_membership` are described as implemented schema with database guards and trusted provisioning, and no text claims that request-time authorization or tenant isolation exists.
+- [x] Column names and constraints cited match [`db/001_init.sql`](../db/001_init.sql), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql), and [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql).
 - [x] One actor can hold independently active memberships with different roles in several organizations.
 - [x] The composite key `(actor_id, organization_id)` is justified only by the one-role-per-organization assumption, and the consequence of dropping that assumption is stated.
 - [x] Authentication, membership representation, and enforcement are kept distinct. `display_name` and request headers are never treated as identity.
@@ -496,5 +521,5 @@ These are documentation-review items, not executed tests. A checked box means th
   - keeps ABC out of the customer-tenant table, and never describes ABC staff as employees of their assigned customers;
   - presents affiliation as distinct from authorization;
   - requires an explicit grant per customer;
-  - presents affiliation-based role eligibility as accepted design in ADR-0006, and as not implemented or tested;
+  - presents affiliation-based role eligibility as accepted in ADR-0006 and implemented in the schema and provisioning, with tests recorded separately;
   - leaves the ADR-0005 permission behavior unchanged.

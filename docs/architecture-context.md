@@ -16,7 +16,7 @@ Decisions are recorded as numbered ADRs. The [ADR index](adr/README.md) explains
 | [ADR-0003](adr/0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (design; not implemented) | [Case creation semantics](case-creation-semantics.md) §3 |
 | [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Accepted (design; not implemented) | — |
-| [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (design; not implemented) | — |
+| [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted; schema, guards, and local provisioning implemented | — |
 
 **Accepted does not mean implemented.** An Accepted ADR records an adopted direction. Several of these decisions include requirements, such as authorization and approval checks, that the current code does not meet. See [Current boundary](#current-boundary).
 
@@ -80,6 +80,8 @@ A local [case service](case-operations.md) ([`src/case_service.py`](../src/case_
 - **No authorization check.** The organization ID it receives filters queries but is supplied by the caller, and the recorded `actor_label` is not a verified identity or approval.
 - **Partial history.** The event table records status transitions made through the service only. It is not a complete or tamper-proof audit trail, and database clients with write access can bypass the service.
 - **No idempotent creation.** Each successful `create_case` call inserts a new case. The idempotency-key contract is accepted as design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), but not implemented, and is detailed in [Case creation semantics](case-creation-semantics.md).
+
+Actor identity and customer access grants ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) implement the data side of [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) and the eligibility rules of [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md). PostgreSQL guards reject ineligible grants and affiliation changes, and trusted local provisioning ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) locks the actor first. Schema, eligibility, and concurrency tests passed locally ([87/87](../tests/identity-grant-integrity-results.md)). Nothing reads these tables at request time yet: credential resolution and authorization are not implemented, and a superuser or a writer that disables triggers can bypass the guards.
 
 ## Current boundary
 

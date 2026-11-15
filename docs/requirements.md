@@ -47,7 +47,7 @@ The platform serves several customer organizations:
 - **Requesters** are staff of a customer organization.
 - **Service engineers, service managers, and platform administrators** are staff of the service provider.
 
-A provider employee does not become an employee of the customers they support. Whether they may work on a customer's cases depends on being authorized for that customer. A person's organizational affiliation is not, by itself, an access right. How affiliation and customer access are modeled is a proposed design in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants) and accepted as design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (not implemented).
+A provider employee does not become an employee of the customers they support. Whether they may work on a customer's cases depends on being authorized for that customer. A person's organizational affiliation is not, by itself, an access right. How affiliation and customer access are modeled is described in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants) and decided in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md). The data model and its role-grant eligibility rules are implemented; request-time authorization is not.
 
 ## 4. Core workflow
 

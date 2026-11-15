@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. Actor identities and customer access grants are stored with database-enforced role-grant eligibility, but nothing uses them to authorize requests yet. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
 
 ## The problem
 
@@ -55,6 +55,7 @@ No real customer data or private third-party project materials are used.
 - [x] Record and validate a real-model triage response — [one synthetic-case run recorded](evaluations/model-run-01.json).
 - [x] Validate AI triage output and failure paths — [18/18 selected tests passed](tests/ai-triage-failure-results.md).
 - [x] Implement version-checked case transitions with event history in a local service — [16/16 tests passed](tests/case-operations-results.md) (8 PostgreSQL-backed, 8 offline policy). This is not yet an authenticated or authorized API.
+- [x] Implement the actor identity schema, provider/customer role-grant eligibility guards, and trusted local provisioning — [87/87 tests passed](tests/identity-grant-integrity-results.md) (61 PostgreSQL-backed, including concurrency; 26 offline). These tables are not yet used for authentication or authorization.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -78,7 +79,8 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
 - [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
-- [Actor and organization membership model](docs/identity-model.md) — proposed normalized identity and membership design (design only; not implemented).
+- [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema and eligibility guards implemented; request-time authorization not implemented.
+- [Identity and role-grant integrity results](tests/identity-grant-integrity-results.md) — observed schema, eligibility, provisioning, and concurrency test results for the identity migration.
 - [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.
 - [First model run evidence](evaluations/model-run-01.json) — recorded input, model output, provenance, timing, token usage, and case state for the first hosted-model run.
 
@@ -115,16 +117,18 @@ If the container already exists from an earlier session, start it with `docker s
 
 ### 3. Apply the schema migrations (once each, in order)
 
-For a fresh database, apply both migrations:
+For a fresh database, apply the migrations in order:
 
 ```bash
 docker cp db/001_init.sql eaiso-postgres:/tmp/001_init.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/001_init.sql
 docker cp db/002_case_status_events.sql eaiso-postgres:/tmp/002_case_status_events.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/002_case_status_events.sql
+docker cp db/003_actor_identity_and_grants.sql eaiso-postgres:/tmp/003_actor_identity_and_grants.sql
+docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/003_actor_identity_and_grants.sql
 ```
 
-`001_init.sql` creates `organization`, `case_record`, and `ai_suggestion`. `002_case_status_events.sql` adds `case_status_event`, the status-transition history used by the [local case service](docs/case-operations.md). **Do not rerun a migration against a database where it has already been applied.**
+`001_init.sql` creates `organization`, `case_record`, and `ai_suggestion`. `002_case_status_events.sql` adds `case_status_event`, the status-transition history used by the [local case service](docs/case-operations.md). `003_actor_identity_and_grants.sql` adds `actor` and `organization_membership` with role-grant eligibility guards ([identity model](docs/identity-model.md#107-the-first-identity-migration-implemented)). **Do not rerun a migration against a database where it has already been applied.**
 
 If your development database was initialized before `002_case_status_events.sql` existed, check whether the event table is present:
 
@@ -132,7 +136,7 @@ If your development database was initialized before `002_case_status_events.sql`
 docker exec eaiso-postgres psql -U eaiso_dev -d eaiso_dev -c "SELECT to_regclass('public.case_status_event');"
 ```
 
-An empty result means the table is missing: apply only the last two commands above (`002_case_status_events.sql`). Do not reapply `001_init.sql`. The dedicated `eaiso_test` database used by the database-backed tests needs the same migration; see [Controlled case operations](docs/case-operations.md#running-tests-against-the-dedicated-database).
+An empty result means the table is missing: apply only the two `002_case_status_events.sql` commands above. Do not reapply `001_init.sql`. Check for migration 003 the same way with `SELECT to_regclass('public.organization_membership');` and, if it is missing, apply only the two `003_actor_identity_and_grants.sql` commands. The dedicated `eaiso_test` database used by the database-backed tests needs the same migrations; see [Controlled case operations](docs/case-operations.md#running-tests-against-the-dedicated-database) and the [identity test results](tests/identity-grant-integrity-results.md#reproduction).
 
 ### 4. Load synthetic development data
 
@@ -142,6 +146,14 @@ docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1
 ```
 
 The seed file provides fictional organizations and sample cases. Avoid rerunning it unless you have checked its duplicate-handling behavior. Its duplicate checks apply to development data only; see [Case creation semantics](docs/case-creation-semantics.md#22-development-seed-script).
+
+Optionally, provision the fictional identities (requesters Ahmed and Fatima, provider engineer Ali and manager Sara for both organizations, and provider administrator Bilal with no grants). This needs migration 003 and the Python environment from the [AI triage section](#1-create-a-python-environment):
+
+```powershell
+.venv\Scripts\python -m scripts.provision_dev_identities --database-url postgresql://eaiso_dev:local-dev-only@127.0.0.1:5432/eaiso_dev
+```
+
+This is a trusted local operator tool, not authenticated self-service: it accepts only a local `eaiso_dev` or `eaiso_test` database and creates no credentials. Rerunning it is safe. Matching actors and grants are left unchanged, and any difference stops the run instead of being overwritten.
 
 ### 5. Verify the data
 
@@ -171,7 +183,7 @@ docker start eaiso-postgres
 
 Data persists in the Docker named volume `eaiso_pgdata`. A normal container stop does not delete it. **Do not remove the volume unless you intend to discard local data.**
 
-The SQL migrations establish the relational model and its structural constraints. They do not, by themselves, enforce the application-level transition policy or protect against every concurrent update. The local [case service](docs/case-operations.md) implements version-checked forward transitions and transactional event history, with [16 recorded passing tests](tests/case-operations-results.md). Authentication, tenant authorization, and reviewer approval remain unimplemented, and database clients with unrestricted write access can bypass the service.
+The SQL migrations establish the relational model and its structural constraints. They do not, by themselves, enforce the application-level transition policy or protect against every concurrent update. The local [case service](docs/case-operations.md) implements version-checked forward transitions and transactional event history, with [16 recorded passing tests](tests/case-operations-results.md). Migration 003 adds database guards so that only ADR-0006-eligible customer access grants can be stored ([87 recorded passing tests](tests/identity-grant-integrity-results.md)). Authentication, tenant authorization, and reviewer approval remain unimplemented, and database clients with unrestricted write access can bypass the service. A superuser, or a writer that disables triggers, can also bypass the guards.
 
 ## Local development: AI triage
 
