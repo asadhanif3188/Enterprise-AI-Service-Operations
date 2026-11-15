@@ -279,7 +279,7 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
   - optional row-level security;
   - a least-privilege application database role.
 - Indexes beyond the primary keys, chosen from measured query plans.
-- An ADR for actor identity and tenant authorization, comparing alternatives. It will be written and reviewed as a later step; **none is accepted by this document**.
+- An ADR for actor identity and tenant authorization, comparing alternatives. It is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**; **none is accepted by this document**.
 
 ## 11. Implementation status
 

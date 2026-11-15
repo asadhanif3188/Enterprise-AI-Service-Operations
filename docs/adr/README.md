@@ -92,16 +92,17 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 | [ADR-0002](0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
 | [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 | [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Proposed | [Case creation semantics](../case-creation-semantics.md) §3 |
+| [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Proposed | — |
 
 ## Future Architecture Decisions — Not Yet Recorded
 
 These topics are expected to need decisions as the project grows. They are backlog items, not accepted decisions, and have no ADR numbers yet.
 
-- Authenticated actor identity and organization membership.
-- Server-side tenant authorization.
+- Authenticated actor identity and organization membership: now proposed in ADR-0005, not accepted.
+- Server-side tenant authorization: now proposed in ADR-0005, not accepted.
 - PostgreSQL row-level security as defense in depth.
 - Human-review approval binding to a specific suggestion and case version.
-- Idempotency key retention and replay-response rules.
+- Idempotency key retention and replay-response rules: replay and local-demonstration retention are proposed in the revised ADR-0004; production retention remains open.
 - Durable background work and job recovery.
 - Analytical projection freshness and reconciliation.
 - Database audit controls and prevention of alternate writers that bypass application rules.

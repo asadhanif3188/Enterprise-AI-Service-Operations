@@ -3,7 +3,7 @@
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** **Proposed / design only.** No credential verification, `actor` or `organization_membership` table, HTTP endpoint, policy code, or authorization test exists. Nothing here has been executed.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
-**Decision boundary:** This document is a policy proposal for review. It is **not** an Accepted ADR, not an implementation, and not proof of tenant isolation. Where and how the policy is enforced belongs to a future authorization ADR. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
+**Decision boundary:** This document is a policy proposal for review. It is **not** an Accepted ADR, not an implementation, and not proof of tenant isolation. Where and how the policy is enforced belongs to the authorization ADR, now [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed). A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
@@ -163,14 +163,19 @@ None of these is resolved by this document.
 
 - **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. Options are listed in [identity model §7](identity-model.md#7-illustrative-membership-lookup); the choice is still open.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
-- **Idempotent replay for requesters.** If keyed creation ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Proposed) replays a case's *current* representation, a requester could read later changes to it. Resolving ADR-0004's open "replay content" question must take the create-only policy into account.
+- **Idempotent replay for requesters.** The revised [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed) addresses this, but nothing is accepted or implemented:
+  - every retry is authorized for `case:create` **before** any key lookup;
+  - keys are scoped to `(authorized organization_id, verified actor_id, 'case:create', key)`, so another member's key is an independent operation;
+  - a replay returns only `id` and `organization_id`, never the case's current state.
+
+  `case:create` is **not** `case:read`. A replay must never act as a read of the current state.
 - **Audit attribution.** `case_status_event.actor_label` stays unverified. Denied attempts and successful creates are not attributed to a verified actor anywhere.
 - **Breadth of engineer and manager visibility.** Organization-wide visibility should be revisited once assignment, sensitive case classes, or internal teams exist.
 - **The inactive-actor status code** (`401` versus `403`).
 - **Optional PostgreSQL row-level security** as defense in depth.
 - **A least-privilege database role**: the local components still use the development account.
 - **Test-only credentials**: how they are configured and resolved without committing secrets.
-- **A future authorization ADR**: where enforcement lives, and whether the policy, row-level security, and query scoping are combined. **No ADR is created or accepted by this document.**
+- **The authorization ADR**: where enforcement lives, and whether the policy, row-level security, and query scoping are combined. It is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**. **This document accepts no ADR.**
 - **Requester creation itself** remains a proposed choice until that ADR, or an equivalent review, accepts it.
 
 ## 9. Design review checklist

@@ -15,6 +15,7 @@ Decisions are recorded as numbered ADRs. The [ADR index](adr/README.md) explains
 | [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
 | [ADR-0003](adr/0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
 | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Proposed | [Case creation semantics](case-creation-semantics.md) §3 |
+| [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Proposed | — |
 
 **Accepted does not mean implemented.** An Accepted ADR records an adopted direction. Several of these decisions include requirements, such as authorization and approval checks, that the current code does not meet. See [Current boundary](#current-boundary).
 

@@ -25,7 +25,8 @@
 - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md): PostgreSQL is authoritative but provides no tenant authorization by itself.
 - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md): AI output and case text never confer permissions.
 - [ADR-0003](adr/0003-application-controlled-case-transitions.md): `transition_case()` must not be exposed to untrusted callers.
-- [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): still **Proposed**; its key scope must be the *authorized* organization.
+- [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): still **Proposed**. Its revised key scope is the *authorized* organization plus the *verified* actor.
+- [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Proposed**. It records this sequence's identity and authorization approach as an architecture decision for review.
 
 **Policy summary.** All rows below assume an active actor with an active membership in the organization being evaluated. Any other state is denied.
 
@@ -136,10 +137,8 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 5. Create the case using the **authorized** organization from the scope, not the raw body value. It starts at `NEW`, version `1`, with no AI call. Return `201` only after commit.
 6. **Keyed creation, if adopted later** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Proposed):
    - Authorize first, before any replay lookup.
-   - Scope the key as `(authorized organization, create_case, key)`.
-   - A replay must not give a create-only requester `case:read` or reveal later changes to the case.
-
-   The replay response is **OPEN** (section 9).
+   - Scope the key as `(authorized organization_id, verified actor_id, 'case:create', key)`.
+   - A replay returns `200` with identity only (`id`, `organization_id`), never the current case state (section 9).
 
 **Isolation:** the selector can only choose one of the actor's own active memberships. Any other organization is denied before anything is persisted.
 
@@ -220,7 +219,7 @@ A single statement does not fully close the gap either. Each PostgreSQL statemen
 
 **Read-side limit.** Once a read response has been sent, no revocation can take it back. Revocation can only affect requests that have not yet been authorized or committed.
 
-**Decision: none.** This document **chooses no revocation guarantee**. The following are candidates for the future authorization ADR to evaluate:
+**Decision: none.** This document **chooses no revocation guarantee**. The following are candidates for the authorization ADR ([ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), Proposed) to evaluate:
 
 - B for reads and lists.
 - C for writes, with the contract "a request that acquired its locks before the revocation may finish; requests authorized after the revocation commits are denied".
@@ -237,18 +236,15 @@ Never hold locks across model calls, long-running work, or client I/O. Caching d
 
 **A later GET.** A requester's `201 Created` response returns the case as part of the create operation. That is not a `case:read` grant. A later `GET /cases/{id}`, including on the `Location` URL, returns the generic `404` (vector V06). Viewing a case's status is deferred until requester ownership is modeled.
 
-**Replay.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) is **Proposed**, and its replay status, replay content, and in-progress behavior are open. Whatever it decides must satisfy these constraints:
+**Replay.** The revised [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) and [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) **propose** the following contract. Both are still Proposed, and none of it is implemented.
 
-1. **Authorization runs before the replay lookup** on every replay. An actor whose membership was revoked gets a denial, not the original case.
-2. **No current-state disclosure to a create-only actor.** A replay must not return the case's current representation to an actor without `case:read`. Otherwise status changes and edits made after creation would leak.
-3. **OPEN: cross-actor replay within one organization.** ADR-0004 scopes keys by `(organization, create_case, key)`, not by actor. If one requester reuses or guesses another member's key in the same organization with an equivalent payload, a replay could return that member's case. A mismatched payload's conflict response could also reveal that the key is in use.
+1. **Authorization runs before the replay lookup** on every replay. An actor whose actor record or membership is inactive is denied, and the response says nothing about stored keys.
+2. **Identity-only replay.** A replay returns `200 OK` with `Location`, `Idempotency-Replayed: true`, and only `id` and `organization_id`, taken from the idempotency record. It never contains the current status, text, or version, so a create-only actor gains no `case:read` ability and sees no later changes.
+3. **The key scope includes the actor.** The scope is `(authorized organization_id, verified actor_id, 'case:create', key)`. Another member who reuses or guesses the same literal key gets an independent operation. That member can neither replay the first actor's case nor cause a `409` that reveals the key exists. This closes the cross-actor risk recorded in the previous version of this section.
 
-   Candidate mitigations, none chosen:
-   - include the verified actor in the key scope;
-   - have the replay return only the minimum (for example, the case ID and no body) to actors without `case:read`;
-   - require keys that are hard to guess.
+   The deliberate tradeoff is that two actors who submit one incident are not deduplicated.
 
-   This needs to be resolved jointly by ADR-0004 and the authorization ADR.
+**Still pending:** architecture-owner acceptance of both ADRs, and executed tests (S08, S09, and the ADR-0004 list). Until then this remains a design intention, not a guarantee.
 
 ## 10. Future negative test cases
 
@@ -263,8 +259,8 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
 | S05 | Database unavailable during the policy lookup | Generic `500`; no protected operation; not `403` or `404` | Proposed, not executed |
 | S06 | List cursor issued for A, replayed with `organization_id=B` by an actor in A only | `403` or cursor rejected; no B rows | Proposed, not executed |
 | S07 | Membership revoked between authorization and write, under each candidate strategy (A, B, C) | Observed ordering recorded; no guarantee claimed until an ADR is accepted | Proposed, not executed |
-| S08 | Requester replays its own create key after the case changed | No current representation disclosed (subject to the ADR-0004 decision) | Proposed, not executed |
-| S09 | A second requester in the same organization reuses the first requester's key | No disclosure of the first requester's case (mitigation OPEN) | Proposed, not executed |
+| S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Proposed, not executed |
+| S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `409` about, the first requester's case | Proposed, not executed |
 | S10 | Logs after a `401`, a `403`, and a `404` | No credential value, no case text, no client header recorded as identity | Proposed, not executed |
 
 ## 11. Review questions
@@ -277,7 +273,7 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
 3. **What enforces the decision?** The authorized-case-operations layer, which calls the policy itself and is the only path routes use to reach case data. How that rule is checked structurally is OPEN (section 3).
 4. **What happens on failures?** A missing membership gives `403`, or `404` for a read. A disabled actor is always denied, with the status OPEN. An unknown role is denied. An invalid token gives `401`. An unknown case gives the generic `404`. A database outage gives a generic `500` and no protected operation (section 7).
 5. **Why does check-then-write race, and what can be done?** The decision and the write are separated in time, and statements read snapshots. The options are a combined predicate (B) or a short transaction holding `FOR SHARE` locks (C). No guarantee is chosen (section 8).
-6. **What does requester create-only mean?** A later GET returns `404`. A replay must re-authorize, must not reveal the current state, and cross-actor key reuse is OPEN (section 9).
+6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. All of this is proposed, and none of it is accepted or tested (section 9).
 
 ## 12. Handoff to the authorization ADR
 
@@ -289,11 +285,11 @@ The future ADR must settle, or explicitly constrain:
 - acceptance of requester create-only;
 - the revocation strategy and lock order, with executed concurrency tests;
 - decision caching;
-- replay constraints, jointly with ADR-0004;
+- acceptance of the replay contract proposed jointly with ADR-0004: actor-scoped keys and an identity-only replay;
 - direct database writers, optional row-level security, and a least-privilege database role;
 - decision logging and attribution.
 
-Accepted ADRs 0001–0003 are unchanged, ADR-0004 stays Proposed, and **no ADR is accepted here**.
+That ADR is now drafted as [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), with status **Proposed**. Accepted ADRs 0001–0003 are unchanged, ADR-0004 stays Proposed, and **no ADR is accepted here**.
 
 ## 13. Document review checklist
 

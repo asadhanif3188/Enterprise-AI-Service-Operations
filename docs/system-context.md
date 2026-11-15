@@ -132,7 +132,7 @@ These capabilities are required by the [requirements](requirements.md) or archit
 | Capability | Requirement or decision |
 |---|---|
 | Human authentication and server-side access checks | FR-02, [DEC-001](architecture-context.md#dec-001--the-application-owns-service-case-data-and-workflow-decisions) |
-| Tenant (organization) authorization | FR-02, rule "Organization ownership" |
+| Tenant (organization) authorization | FR-02, rule "Organization ownership"; [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Proposed) |
 | Reviewer approval bound to a specific suggestion version, and execution of approved updates | FR-06, FR-07, [DEC-003](architecture-context.md#dec-003--only-authorized-application-operations-can-change-case-state) |
 | A public or internal application API | Required before any of the above can be offered to users |
 | Idempotent case creation | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Proposed); contract detailed in [Case creation semantics](case-creation-semantics.md) |
