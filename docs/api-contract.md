@@ -1,9 +1,9 @@
 # Service Case API Contract — Initial Proposal
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Design only. HTTP endpoints, authenticated principals, organization memberships, and idempotent creation are not implemented.**  
+**Status:** **HTTP endpoints and idempotent creation are not implemented.** The identity, membership, credential, and authorization pieces behind this contract are implemented as a Python layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [results](../tests/case-authorization-results.md)).  
 **Scope:** `POST /cases`, `GET /cases/{id}`, and `GET /cases`; secure request identity; organization-scoped access; case-creation retry semantics.  
-**Evidence class:** Design only. Examples, response codes, and test scenarios below are not measured outcomes.
+**Evidence class:** Design for the HTTP layer. Examples, response codes, and HTTP test scenarios below are not measured outcomes; Python-layer results are recorded separately.
 
 ## 1. Governing Architecture Decisions
 
@@ -54,9 +54,9 @@ The planned HTTP layer must not expose these functions directly without a verifi
 flowchart TD
     U[Client with test credential] --> A[HTTP API boundary — PLANNED]
     A --> I[Resolve principal from server-controlled credential — IMPLEMENTED as a local module]
-    I --> P[Load active organization membership and role — PLANNED]
+    I --> P[Authorized case operations: membership, role, scoped SQL — IMPLEMENTED in Python]
     P -->|Denied| D[Return error without case data]
-    P -->|Allowed| S[Case service — EXISTING, to be wrapped]
+    P -->|Allowed| S[Scoped case SQL in the authorized layer — IMPLEMENTED]
     S --> DB[(PostgreSQL: case_record, ai_suggestion — EXISTING)]
     S -.-> H[(Idempotency record — PLANNED for keyed POST)]
     R[Local triage runner — EXISTING] --> M[Model adapter — EXISTING]
@@ -74,13 +74,13 @@ Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case
 2. Obtain the actor's active membership and role in that organization from **server-owned data**, not from request claims.
 3. Check that the role grants the action. The initial demonstration matrix is deliberately narrow:
    - `service_engineer` and `service_manager` can create, read, and list cases in their own member organizations.
-   - `requester` may create cases only in its own member organization (accepted in ADR-0005, not implemented). It gets no case reading or listing until per-case requester ownership and permissions are modeled. See the [minimum role-permission policy](authorization-permissions.md).
+   - `requester` may create cases only in its own member organization (accepted in ADR-0005; implemented in the Python layer). It gets no case reading or listing until per-case requester ownership and permissions are modeled. See the [minimum role-permission policy](authorization-permissions.md).
    - `platform_administrator` is **not** automatically entitled to all customer data without an explicit decision.
 4. When fetching by case ID, determine the case's actual `organization_id` and check membership. Never accept a claimed owner without verification.
 5. Restrict every SQL read to the authorized scope, for example `WHERE c.id = :case_id AND c.organization_id = :authorized_org_id`. This predicate is defense in depth **after** membership is verified, not a replacement for it.
 6. Do not expose cases or their existence outside the actor's scope. For a single case, return a generic `404` for both nonexistent and inaccessible IDs. For an explicitly requested forbidden organization listing, return `403` without rows. Both outcomes must be tested.
 
-`organization` and `case_record` are implemented. A normalized actor and organization-membership representation is **proposed for the next implementation increment**. The role matrix and the enforcement architecture are **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) but **not implemented**. The roles come from the [requirements](requirements.md#3-users-and-responsibilities), which leave exact permission rules to be specified before the affected endpoints are implemented.
+`organization` and `case_record` are implemented. The normalized `actor` and `organization_membership` tables are implemented ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)). The role matrix and the enforcement architecture are **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) and implemented in the Python authorized-case-operations layer; the HTTP boundary that would call it is **not implemented**. The roles come from the [requirements](requirements.md#3-users-and-responsibilities), which leave exact permission rules to be specified before the affected endpoints are implemented.
 
 ## 5. `POST /cases` — create a case (PLANNED)
 
@@ -253,7 +253,7 @@ A server-generated correlation or request ID is used in logs and may be returned
 - `ai_suggestion(case_id FK, case_version, ...)` keeps zero or more non-authoritative model outputs out of the mutable case row.
 - `case_status_event(case_id FK, from_status, to_status, from_version, to_version, ...)` records transition history separately from the current case row.
 
-**Proposed identity normalization (not implemented):** see the [actor and organization membership model](identity-model.md) for the detailed design.
+**Identity normalization (implemented in migration 003):** see the [actor and organization membership model](identity-model.md) for the detailed design.
 
 - `actor(id, ...)` represents a server-verified application principal, or an internal mapping to an identity system.
 - `organization_membership(actor_id FK, organization_id FK, role, active, ...)` associates an actor with an organization, instead of a single `actor.organization_id` or a comma-delimited list. For a single role per membership, uniqueness is enforced on `(actor_id, organization_id)`. Multiple role assignments would need a deliberately different key or schema.
@@ -285,6 +285,8 @@ LIMIT $2;
 No `case_record(organization_id, created_at, id)` index is added yet. The next measurement increment records `EXPLAIN (ANALYZE, BUFFERS)` plans using the **existing** primary-key and unique indexes. A later increment compares index changes using a controlled data generator and representative workloads.
 
 ## 11. Proposed acceptance tests and proof boundaries
+
+The statuses below refer to **HTTP** tests, and none exists. Python-layer equivalents have passed for the first six rows and the last row, through the authorized-case-operations layer against PostgreSQL ([case authorization results](../tests/case-authorization-results.md)): no credential, cross-organization create, read, and list, forged identity, and identical unkeyed requests. They are not evidence of HTTP behavior.
 
 | Scenario | Intended outcome | Status |
 |---|---|---|

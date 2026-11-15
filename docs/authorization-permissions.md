@@ -1,14 +1,14 @@
 # Case Authorization — Minimum Role-Permission Policy
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Design only.** The policy is **accepted as architecture** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15) but is **not implemented**. No HTTP endpoint, policy code, or authorization test exists, and nothing here has been executed. A local credential resolver exists ([`src/credential_auth.py`](../src/credential_auth.py)) but establishes identity only. The `actor` and `organization_membership` tables now exist ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)), but no request reads them.  
+**Status:** **Implemented in a Python authorization layer; no HTTP boundary.** The policy is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). The permission matrix is in [`src/case_authorization.py`](../src/case_authorization.py), and it is enforced by the authorized-case-operations layer in [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), which resolves the caller's credential with [`src/credential_auth.py`](../src/credential_auth.py) and reads `actor` and `organization_membership`. Python-level PostgreSQL-backed tests passed ([case authorization results](../tests/case-authorization-results.md)). **No HTTP endpoint exists**, and the HTTP test vectors in section 6 have not been executed.  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
-**Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. It is not an implementation and not proof of tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
+**Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. Passing Python-layer tests are not proof of production tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
 - **What exists:** `organization` and `case_record` are implemented ([`db/001_init.sql`](../db/001_init.sql)), and so is `case_status_event` ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)).
-- **What exists for identity:** `actor` and `organization_membership`, with the ADR-0006 role-grant eligibility guards and trusted local provisioning ([identity model](identity-model.md), [test results](../tests/identity-grant-integrity-results.md)). They hold data only; this policy is not enforced anywhere.
+- **What exists for identity:** `actor` and `organization_membership`, with the ADR-0006 role-grant eligibility guards and trusted local provisioning ([identity model](identity-model.md), [test results](../tests/identity-grant-integrity-results.md)). The authorized-case-operations layer reads them to enforce this policy.
 - **Current case service:** [`src/case_service.py`](../src/case_service.py) filters queries by a caller-supplied organization ID. That is query scoping, not authorization.
 - **Governing decisions:**
   - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) require application-controlled access but do not implement it.
@@ -63,7 +63,7 @@ Earlier guidance listed requester creation as a *candidate*. This document propo
 - **Create:** an active requester may `case:create` only in an organization where it holds an active `requester` membership.
 - **Read and list:** the requester receives **no** `case:read` and **no** `case:list`, not even for cases it submitted.
 
-The rule is accepted as architecture. It is **not implemented**.
+The rule is accepted as architecture and implemented in the Python layer: a requester's create succeeds, and its later read of that case gets the generic not-found outcome. No HTTP route exists.
 
 **Rationale.** The requirements name case submission as the requester's responsibility ([§3](requirements.md#3-users-and-responsibilities), [§4 step 1](requirements.md#4-core-workflow)). Granting create therefore serves an intended business function. Reading is withheld because `case_record` has no requester-ownership relation, so an organization-wide read would expose other requesters' cases.
 
@@ -119,7 +119,13 @@ Error bodies never include foreign case data, SQL, credentials, or membership li
 
 ## 6. Proposed test vectors
 
-Every vector below is **proposed, not executed**. No policy, API, or security test has run. When implemented, each vector must assert both the HTTP response **and** the database state in the dedicated test database. Organizations A and B and all actors are fictional.
+Every **HTTP** vector below is **proposed, not executed**: no API exists. When the HTTP boundary is implemented, each vector must assert both the HTTP response **and** the database state in the dedicated test database. Organizations A and B and all actors are fictional.
+
+**Python-layer equivalents executed** (not HTTP; outcomes are typed exceptions carrying the ADR-0005 status) are recorded in the [case authorization results](../tests/case-authorization-results.md):
+
+- **Executed at the Python layer:** V01–V11, V13–V18, V20, and V21. V21 is enforced because `list_cases` requires an organization.
+- **V12 cannot be set up:** ADR-0006 forbids an actor holding an engineer grant in one customer and a requester grant in another. The per-organization evaluation it targets is covered by the two-grant engineer test instead.
+- **HTTP-specific:** V19 (header fallback) and V22 (no transition route). The Python layer exposes only create, read, and list, and accepts no actor or header input.
 
 | ID | Verified actor and memberships | Request | Expected outcome | State assertion | Status |
 |---|---|---|---|---|---|
@@ -161,10 +167,10 @@ This policy grants none of the following. They need separate designs, and in sev
 
 None of these is resolved by this document.
 
-- **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. Its behavior under concurrency is untested.
+- **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. The write-side ordering is implemented and tested with real PostgreSQL sessions; reads are shown not to wait for an uncommitted revocation ([results](../tests/case-authorization-results.md)). Revocation is still not instantaneous for in-flight reads.
 - **Role-grant eligibility.** This policy defines what a granted role may do. Who may *receive* each role, by actor affiliation, is decided separately in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Accepted; enforced when grants are written by database guards and provisioning). It adds no request-time predicate and does not change this matrix.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
-- **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design, but nothing is implemented, and requester create-only itself is still only proposed:
+- **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design but not implemented. Requester create-only itself is implemented in the Python layer:
   - every retry is authorized for `case:create` **before** any key lookup;
   - keys are scoped to `(authorized organization_id, verified actor_id, 'case:create', key)`, so another member's key is an independent operation;
   - a replay returns only `id` and `organization_id`, never the case's current state.
@@ -174,19 +180,19 @@ None of these is resolved by this document.
 - **Breadth of engineer and manager visibility.** Organization-wide visibility should be revisited once assignment, sensitive case classes, or internal teams exist.
 - **Optional PostgreSQL row-level security** as defense in depth.
 - **A least-privilege database role**: the local components still use the development account.
-- **Test-only credentials**: how they are configured and resolved without committing secrets.
-- **Enforcement details beyond ADR-0005.** [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted) settles where enforcement lives, the inactive-actor status (`403`), and requester create-only. Still open: the structural no-bypass check mechanism, the credential configuration mechanism, and whether row-level security is added for defense in depth.
+- **Test-only credentials**: implemented as a git-ignored digest store ([authentication sequence §5.1](authentication-authorization-sequence.md#51-implemented-local-credential-resolver)); production credential management remains open.
+- **Enforcement details beyond ADR-0005.** [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted) settles where enforcement lives, the inactive-actor status (`403`), and requester create-only. Implemented: the structural no-bypass check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py)) and the credential configuration. Still open: whether row-level security is added for defense in depth.
 
 ## 9. Design review checklist
 
-These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0005 and the linked documents on 2026-11-15. It is **not** evidence that authorization is implemented or tested.
+These are documentation-review items. A checked box means the statement was verified by inspecting this document against ADR-0005 and the linked documents on 2026-11-15. Executed test results are recorded separately in the [case authorization results](../tests/case-authorization-results.md).
 
 - [x] Every permission in sections 2 and 3 uses only `case:create`, `case:read`, or `case:list`, with the role names `service_engineer`, `service_manager`, and `requester`.
 - [x] Every allow path requires all six predicates in section 4. No path allows access based on a role name, header, display name, or supplied organization ID alone.
 - [x] Unknown roles, inactive actors, inactive memberships, and missing memberships are always denied.
 - [x] `case:read` evaluates the persisted case owner; a nonexistent case and a foreign case produce the same `404`.
-- [x] Requester create-only is presented as accepted in ADR-0005, but not implemented, with its deferred status-viewing consequence stated.
+- [x] Requester create-only is presented as accepted in ADR-0005 and implemented in the Python layer, with its deferred status-viewing consequence stated.
 - [x] `platform_administrator` has no implicit cross-customer access.
-- [x] All test vectors are marked proposed and not executed, and each states a database-state assertion.
+- [x] All HTTP test vectors are marked proposed and not executed, and each states a database-state assertion; Python-layer equivalents are listed separately.
 - [x] Excluded permissions and open issues are recorded, not silently decided.
 - [x] Consistent with the [identity model](identity-model.md), the [API contract](api-contract.md), the [requirements](requirements.md), the [data model](data-model.md), and the [ADR register](adr/README.md#register).

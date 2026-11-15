@@ -4,7 +4,8 @@
 **Status:** **Schema implemented; authorization not implemented.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md).
 - **Implemented:** the `actor` and `organization_membership` tables, the ADR-0006 eligibility guards, and trusted local provisioning ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py)), with PostgreSQL-backed tests that passed in a local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)).
 - **Implemented separately:** local credential verification that resolves an opaque test credential to an `actor.id` ([`src/credential_auth.py`](../src/credential_auth.py); [results](../tests/credential-verification-results.md)).
-- **Not implemented:** request-time authorization checks and HTTP endpoints. Nothing in the case service reads these tables yet.
+- **Implemented separately:** request-time authorization through the authorized-case-operations layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [results](../tests/case-authorization-results.md)).
+- **Not implemented:** HTTP endpoints. The local case service (`src/case_service.py`) still does not read these tables.
 
 
 **Scope:** The normalized data model that would let the platform represent which actors belong to which customer organizations, and in which role. Choosing an authentication provider, implementing enforcement, and recording permission-test results are out of scope.  
@@ -286,7 +287,7 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 - **Implemented schema:** the `actor` columns and `actor_affiliation_consistent`, and the `organization_membership` relation ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)).
 - **Implemented enforcement:** provisioning validation ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) and the PostgreSQL guards `organization_membership_role_eligible` and `actor_grants_remain_eligible` (section 10.7).
 - **Observed tests:** schema, eligibility, provisioning, and concurrency tests passed against PostgreSQL 16 in one local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)). This is not a proof of race freedom.
-- **Not implemented:** request-time authorization (ADR-0005). Credential verification exists but consults neither affiliation nor grants, and no case operation reads them yet.
+- **Request time:** the authorized-case-operations layer reads active grants and roles (ADR-0005); affiliation is not a request-time predicate. No HTTP boundary exists.
 
 - It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
 - Nothing in this section is a permission.
@@ -497,7 +498,7 @@ Observed results, including concurrency scenarios and the remaining limitations,
 - [`src/identity_provisioning.py`](../src/identity_provisioning.py) and [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py): trusted local provisioning and the fictional scenario;
 - [`tests/test_identity_grants.py`](../tests/test_identity_grants.py): offline and PostgreSQL-backed schema, eligibility, provisioning, and concurrency tests, with results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-**Not implemented:** no policy code exists and no permission test has run (credential verification exists, but nothing calls it yet), and the case service still treats `organization_id` as a caller-supplied query filter. The new tables **do not establish tenant authorization**, and a superuser or a writer that disables triggers can bypass the guards.
+**Authorization:** the authorized-case-operations layer enforces the permission matrix against these tables, with PostgreSQL-backed tests ([results](../tests/case-authorization-results.md)). **Not implemented:** an HTTP boundary. The local case service still treats `organization_id` as a caller-supplied query filter, and a superuser or a writer that disables triggers can bypass the guards.
 
 The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). Later increments would add:
 

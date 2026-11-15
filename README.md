@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. Actor identities and customer access grants are stored with database-enforced role-grant eligibility, and a local module verifies opaque test credentials to identify an actor, but nothing uses them to authorize requests yet. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. Actor identities and customer access grants are stored with database-enforced role-grant eligibility, a local module verifies opaque test credentials, and a central Python authorization layer enforces organization-scoped create, read, and list permissions. No HTTP API calls it yet. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
 
 ## The problem
 
@@ -56,7 +56,8 @@ No real customer data or private third-party project materials are used.
 - [x] Validate AI triage output and failure paths — [18/18 selected tests passed](tests/ai-triage-failure-results.md).
 - [x] Implement version-checked case transitions with event history in a local service — [16/16 tests passed](tests/case-operations-results.md) (8 PostgreSQL-backed, 8 offline policy). This is not yet an authenticated or authorized API.
 - [x] Implement the actor identity schema, provider/customer role-grant eligibility guards, and trusted local provisioning — [87/87 tests passed](tests/identity-grant-integrity-results.md) (61 PostgreSQL-backed, including concurrency; 26 offline). These tables are not yet used for authorization.
-- [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary or tenant authorization uses it yet.
+- [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary uses it yet.
+- [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). This is a Python boundary, not yet an HTTP API.
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -80,8 +81,10 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
 - [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
-- [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema and eligibility guards implemented; request-time authorization not implemented.
+- [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema, eligibility guards, and Python-layer authorization implemented; no HTTP API.
 - [Local credential verification](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver) — opaque test credential format, digest store, outcomes, rotation and revocation, and limitations.
+- [Case authorization](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) — the authorized-case-operations layer, outcomes, and structural no-bypass check.
+- [Case authorization results](tests/case-authorization-results.md) — observed permission-matrix, cross-customer, revocation-concurrency, and structural-check results.
 - [Credential verification results](tests/credential-verification-results.md) — observed offline and PostgreSQL-backed results for the credential resolver.
 - [Identity and role-grant integrity results](tests/identity-grant-integrity-results.md) — observed schema, eligibility, provisioning, and concurrency test results for the identity migration.
 - [Case operations validation results](tests/case-operations-results.md) — observed PostgreSQL-backed and offline policy results for transitions, version checks, rollback, and concurrent updates.
@@ -164,7 +167,7 @@ To issue a local test credential for one of those actors (the provisioning comma
 .venv\Scripts\python -m scripts.manage_test_credentials issue --actor-id <actor-uuid> --database-url postgresql://eaiso_dev:local-dev-only@127.0.0.1:5432/eaiso_dev
 ```
 
-The credential is printed **once** and is not stored anywhere; only its SHA-256 digest goes into the git-ignored `.local/test-credentials.json`. Keep it out of version control, issues, and logs. Use `rotate`, `revoke`, `remove`, and `list` with `--credential-id` to manage it. This identifies an actor only; no HTTP API or authorization uses it yet ([details](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver)).
+The credential is printed **once** and is not stored anywhere; only its SHA-256 digest goes into the git-ignored `.local/test-credentials.json`. Keep it out of version control, issues, and logs. Use `rotate`, `revoke`, `remove`, and `list` with `--credential-id` to manage it. The credential identifies an actor; the [authorized case operations](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) layer uses it to authorize create, read, and list. No HTTP API exists yet ([credential details](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver)).
 
 ### 5. Verify the data
 
