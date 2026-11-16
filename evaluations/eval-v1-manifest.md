@@ -10,6 +10,9 @@
 
 **Rubric:** [`eval-v1-rubric.md`](eval-v1-rubric.md), v0.2 proposal, owner approval pending.
 
+**Reference review:** [`eval-v1-reference-review.md`](eval-v1-reference-review.md),
+an AI-assisted consolidated review (Day 13B). It is not an approval record.
+
 ## Purpose and provenance
 
 Evaluate advisory initial service-case triage using only fictional input facts:
@@ -87,9 +90,36 @@ input, proposed labels, exact spans, rationale, tags and blank decision fields.
 It is an ignored review aid, not approval evidence. A private closeout note is
 also excluded locally. No new `.gitignore` rule is required.
 
+### Review history
+
+| Date | Revision reviewed | Source and provenance | Outcome | Changes | Approval effect |
+|---|---|---|---|---|---|
+| 2026-11-16 (Day 13A) | `f7f92ff` baseline | Codex-authored proposals | 20 proposals authored | Dataset created | None; all PENDING |
+| 2026-11-16 (Day 13B) | `16345e5` | Consolidated AI-assisted review: ChatGPT-assisted advisory review plus a Gemini-generated ledger that claims an owner `FINAL` approval. That claim is **unverified** and not treated as sign-off. See the [review record](eval-v1-reference-review.md). | 20/20 label agreement, confirmed by script against this repository, together with exact-span checks | Draft refinement to 003: added the exact span "The only person who tried it moved to an adjacent working desk in two minutes." No label, rationale, tag or input changes. | None; 20 PENDING, 0 FINAL |
+
+Day 13B dataset checksums. Both are **PROVISIONAL**, computed over the exact
+LF-normalized bytes Git stores. They exist only for review traceability and are
+not freeze checksums:
+
+- Reviewed revision `16345e5`:
+  `675016edd31e4890ae7a8e1b51663aaaafd714dd3dfe5621d19111f8f8659bba`
+- After the 003 span refinement (pending approval):
+  `e7b843e06ec82171651e3dda359c821b5d8d62259d35eed0dfdc8bd77941faef`
+
+Decisions still open after Day 13B:
+
+- Approve or correct all 20 references, including every null dimension (014,
+  015, 016, 017, 019, 020).
+- Decide 002, medium or low.
+- Accept or reject the 003 span refinement.
+- Decide on rubric v0.2.
+- Authorize FINAL status and, separately, the dataset freeze.
+
 ### Approval ledger
 
-**No approval records.** Rubric v0.2: PENDING. Freeze authorization: PENDING.
+**No approval records.** Human approvals: 0. Rubric v0.2: PENDING. Freeze
+authorization: PENDING. The Day 13B AI-assisted reviews, including the Gemini
+ledger's self-described approval, are not approval records (rubric 8.6).
 
 Before changing any row to FINAL, record the actual reviewer ID, review date,
 case ID(s), reviewed artifact revision, accepted/corrected values, and rationale
@@ -168,6 +198,13 @@ database was called. Windows sandbox temp-directory permissions required a
 rerun with filesystem access; the private closeout preserves the failed setup
 attempt and exact final command. The structural validator passes independently.
 
+Day 13B rerun on 2026-11-16, after the 003 span refinement, using the same three
+test files with `-m "not db"`: **82 collected, 78 selected and executed, 78
+passed, 0 failed, 0 errors, 0 skipped, 4 deselected** (the PostgreSQL tests). The
+default validator returned 0 (structurally valid). `--require-final` returned
+**1 / PARTIAL**, which is expected while 0 references are FINAL; it is neither a
+regression nor an acceptance. No hosted model or database was called.
+
 ## Limitations and change control
 
 This is a small, intentionally varied synthetic set, not a representative sample
@@ -175,7 +212,9 @@ of production traffic or proof of reliability, security, fairness or business
 benefit. The same AI author created inputs and proposals; owner review is needed
 to challenge shared assumptions. A single injection example does not establish
 resistance to adversarial input. Subjective grounding/safety judgments and the
-urgency anchors need calibration. The repeated pair is correlated, not two
+urgency anchors need calibration. The Day 13B AI reviewers assessed the existing
+proposals rather than labeling blind, so their agreement does not remove the
+shared-assumption risk. The repeated pair is correlated, not two
 independent observations for statistical inference. All cases are independently
 authored original material; that does not imply statistical independence.
 

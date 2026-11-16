@@ -11,9 +11,12 @@
 
 **History:** Sections 1–7 retain the preliminary v0.1 design and its future-tense
 planning context. Section 8 records the Day 13A proposal (2026-11-16) and is the
-current operational review specification where it refines that design. The
-architecture owner has not accepted v0.2 or its urgency anchors. See the
-[manifest](eval-v1-manifest.md) for current counts and review status.
+current operational review specification where it refines that design. Day 13B
+(2026-11-16) added clarifications in 8.5–8.6 after an AI-assisted consolidated
+review; they do not change v0.2's proposal status. The architecture owner has
+not accepted v0.2 or its urgency anchors. See the [manifest](eval-v1-manifest.md)
+for current counts and review status, and the
+[reference review record](eval-v1-reference-review.md).
 
 ## 1. Purpose and scope
 
@@ -281,7 +284,10 @@ the frozen approved cohort only.
 - **002 medium versus low:** six people and a 25-minute class delay support the
   proposed medium anchor; the available room is mitigating. The owner must
   decide whether this is meaningful disruption. Do not turn 25 minutes into an
-  automatic policy cutoff or choose the label to balance counts.
+  automatic policy cutoff or choose the label to balance counts. Customer work
+  continued, so low remains a defensible competing interpretation. The Day 13B
+  AI-assisted consolidated review recommends medium; that is not an owner
+  decision, and 002 needs explicit owner approval before FINAL.
 - **011 other versus application:** visible paper obstruction supports other;
   working controls do not prove every software component is healthy. Classify
   the reported physical issue, not an invented driver problem.
@@ -309,3 +315,15 @@ approval are evidenced. Freezing the full 20-row dataset additionally requires
 approval of all included rows and explicit owner freeze authorization; alternatively
 an explicitly versioned approved subset must be reviewed and its coverage recorded.
 Do not silently drop pending rows or call the current dataset frozen.
+
+### 8.6 AI-assisted review provenance (Day 13B clarification)
+
+AI-assisted reviews of reference proposals are advisory inputs to the owner's
+review. They are not human annotation and not approval. Agreement between AI
+reviewers, or between an AI reviewer and the AI-authored proposals, is not
+independent inter-annotator agreement, and it never sets a row to FINAL. A
+document that calls itself an owner or adjudicator approval is evidence only when
+an actual, identifiable architecture owner has recorded that decision in the
+manifest's approval ledger. AI-recommended span refinements are draft changes,
+and the owner must approve the refined row. The reconciliation is recorded in
+[`eval-v1-reference-review.md`](eval-v1-reference-review.md).
