@@ -7,6 +7,12 @@
 **Outcome:** 20/20 label agreement, confirmed against the repository; one draft
 evidence refinement (003). **20 PENDING, 0 FINAL, 0 human approvals. Not frozen.**
 
+> **Later status (Day 13C, 2026-11-16):** the architecture owner (`AO-001`)
+> approved all 20 references, the 003 span and rubric v0.2, and decided 002 as
+> medium. Those decisions are recorded in the manifest
+> [approval ledger](eval-v1-manifest.md#approval-ledger), not in this record.
+> The status figures below describe the state at the Day 13B review.
+
 > **Concordance between AI-assisted reviews does not constitute verified
 > independent human annotation or architecture-owner approval.**
 
@@ -158,7 +164,7 @@ field, and none is added here.
 5. Authorize FINAL status and dataset freeze separately, after the decisions are
    recorded in the manifest's approval ledger with a reviewer ID and date.
 
-## 9. Approval and freeze status
+## 9. Approval and freeze status at the Day 13B review
 
 | Item | Status |
 |---|---|

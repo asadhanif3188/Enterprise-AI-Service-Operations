@@ -1,7 +1,7 @@
-# AI Triage Evaluation — Rubric v0.2 proposal
+# AI Triage Evaluation — Rubric v0.2
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** DRAFT / OWNER REVIEW PENDING — 20 proposed references, zero human approvals; no evaluation results
+**Status:** APPROVED without amendment by the architecture owner (`AO-001`) on 2026-11-16, Asia/Karachi. 20 FINAL references; no evaluation results
 
 **Target dataset:** [`eval-v1.jsonl`](eval-v1.jsonl) (authored, not frozen)
 
@@ -13,9 +13,12 @@
 planning context. Section 8 records the Day 13A proposal (2026-11-16) and is the
 current operational review specification where it refines that design. Day 13B
 (2026-11-16) added clarifications in 8.5–8.6 after an AI-assisted consolidated
-review; they do not change v0.2's proposal status. The architecture owner has
-not accepted v0.2 or its urgency anchors. See the [manifest](eval-v1-manifest.md)
-for current counts and review status, and the
+review. On 2026-11-16 (Day 13C) the architecture owner approved v0.2, including
+sections 8.5–8.6 and the urgency anchors, without amendment, and decided 002 as
+medium. Section 8 keeps the wording as reviewed. Where it calls the text a
+proposal, unapproved or pending owner approval, that describes the state before
+approval. See the [manifest](eval-v1-manifest.md) approval ledger for current
+counts and review status, and the
 [reference review record](eval-v1-reference-review.md).
 
 ## 1. Purpose and scope
