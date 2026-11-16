@@ -111,7 +111,7 @@ These follow the [API contract error table](api-contract.md#8-error-contract).
 | Verified actor, explicit target organization not authorized for `case:create` or `case:list` (no membership, inactive membership, or role lacks the permission) | `403 Forbidden` | No case rows; no membership details |
 | `GET /cases/{id}`: case does not exist, **or** exists in an organization the actor is not authorized to read | The **same** generic `404 Not Found` | The two cases must be indistinguishable in status and body |
 | Requester calls `GET /cases/{id}` in its own organization | `404 Not Found` (falls under the previous row) | Same as above |
-| `GET /cases` without `organization_id`, or with an invalid one | Rejected as invalid; the contract's `400`/`422` split is not settled for this case | Never falls back to listing all organizations |
+| `GET /cases` without `organization_id`, or with an invalid one | `400 Bad Request`: `missing_parameter` when it is absent (a request-syntax check, made before the credential is verified); `invalid_parameter` when it is not a canonical UUID (a value check, made after authentication, so an invalid credential gets `401` first). See [API contract §3.1](api-contract.md#31-implemented-interim-behavior) | Never falls back to listing all organizations |
 | Verified credential, **inactive actor** | `403 Forbidden`, always denied (ADR-0005). A revoked credential gets `401` instead. | No case data |
 | Attempted HTTP update or transition | No such route exists, and nothing is mutated | Not evidence that authorized updates are enforced |
 
