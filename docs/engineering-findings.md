@@ -67,6 +67,7 @@ Identifiers have the form `FDE-C<n>-<AREA>-<NNN>`:
 |---|---|---|---|---|---|---|
 | [FDE-C1-READ-001](#fde-c1-read-001) | Inconsistent inactive-actor HTTP status under concurrent revocation | Correctness | Low | OPEN — accepted limitation | `GET /cases/{id}` | Transaction and concurrency correctness review |
 | [FDE-C1-IDEM-001](#fde-c1-idem-001) | Unrelated organization-row lock misclassified as in-flight idempotent request | Correctness | Low | OPEN — accepted limitation | `POST /cases` with `Idempotency-Key` | Transaction and concurrency correctness review |
+| [FDE-C1-DOC-001](#fde-c1-doc-001) | V22 route-absence evidence attributed as a database-backed state assertion | Documentation | Informational | CLOSED — fixed | `docs/authorization-permissions.md`, section 6 | Authorization evidence accuracy review |
 
 ## 5. Finding records
 
@@ -207,6 +208,67 @@ The outcome determines whether documentation, an ADR revision, or a superseding 
 **Resolution summary:** Not established.  
 **Verification evidence:** Not established.  
 **Closure date:** Not established.
+
+### FDE-C1-DOC-001
+
+**V22 route-absence evidence attributed as a database-backed state assertion**
+
+| Field | Value |
+|---|---|
+| Category | Documentation (evidence accuracy) |
+| Severity | Informational |
+| Status | CLOSED — fixed |
+| Discovered | 2026-11-16, during an architecture review of the authorization test evidence |
+| Affected component | [`docs/authorization-permissions.md`](authorization-permissions.md#6-proposed-test-vectors), section 6 introduction and vector V22 |
+| Related requirement or ADR | [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); [authorization policy section 7](authorization-permissions.md#7-explicitly-excluded-permissions) (no update or transition permission is granted) |
+| Target milestone | Authorization evidence accuracy review |
+
+**Observed behavior (from document and test review).**
+
+- **What the documentation claimed.**
+  - Section 6 said every HTTP vector test "asserts both the HTTP response **and** the database state in the dedicated test database".
+  - The V22 row ("any HTTP status change for an A case") gave the state assertion "`status` and `version` unchanged" and the status "Passed (HTTP)".
+- **What the test does.** The test for V22, `test_no_transition_administrative_or_documentation_routes_offline` in [`tests/test_http_case_api.py`](../tests/test_http_case_api.py):
+  - uses the `offline_client` fixture, which points at an unreachable database;
+  - sends a well-formed, never-issued token to random-UUID paths;
+  - asserts only `404`/`405` with `route_not_found` or `method_not_allowed`.
+- **What the test does not do.** It creates no organization, actor or case, and it reads no persisted `status` or `version`.
+- **Other vectors.** The blanket statement was also broader than the read vectors V02 and V06, whose "No change" entries are not checked in the database.
+
+**Expected behavior.** Under [section 6 of this register](#6-evidence-provenance-rules), evidence states the level at which it was observed. An offline route-absence check must not be presented as a database-backed state assertion, or as authorization evidence for an operation that does not exist.
+
+**Reproduction and evidence provenance.** This was established by reading the committed documentation and test; it is not a runtime defect. The [HTTP case API results](../tests/http-case-api-results.md) already attribute V22 to the offline test, and they are unchanged.
+
+**Impact.** A reader could overestimate the evidence for update and transition protection. The conclusion itself was correct: no HTTP update or transition route exists. No code, test or authorization behavior was affected.
+
+**Decision and options.** The owner accepted this finding as Informational and directed a documentation correction only. No update endpoint and no new authorization behavior are added.
+
+**Acceptance criteria.**
+
+1. The V22 row states that it proves the absence of the HTTP routes through an offline ASGI test. It must not assert persisted `status`/`version`, and must not demonstrate cross-tenant authorization of an implemented update operation.
+2. The section 6 introduction names which vectors' state assertions are checked in the database, keeping the valid claims.
+3. No production code, migration or test changes.
+
+**Resolution summary.** [`docs/authorization-permissions.md`](authorization-permissions.md#6-proposed-test-vectors) section 6 now:
+
+- states that V22 is an offline ASGI route-absence test with no state assertion;
+- names the database-checked state assertions: V01, V04, V05, V08–V11, V13–V15, V17 and V18;
+- names the response-only entries: V03, V07, V10, V15 and V19–V21;
+- says that the "No change" entries for V02 and V06 are not checked in the database.
+
+Recorded in the revision that adds this entry (`docs: correct V22 authorization evidence attribution`).
+
+**Verification evidence.**
+
+- The corrected wording was compared line by line with the test bodies in `tests/test_http_case_api.py`:
+  - `assert_matches_db` and `world.snapshot()` for the database-checked vectors;
+  - the `offline_client` fixture for V22.
+- The V22 test was rerun unchanged on 2026-11-16 (offline, no database):
+  - selected alone (14 parametrized cases): **14 passed**, 0 failed, 0 skipped, 94 deselected;
+  - with the offline HTTP subset (`-m "not db"`): **86 passed**, 0 failed, 0 skipped, 22 deselected (the PostgreSQL-backed tests).
+- This is a documentation-only change. No code, test or authorization behavior changed, so no new regression test applies.
+
+**Closure date:** 2026-11-16.
 
 ## 6. Evidence provenance rules
 

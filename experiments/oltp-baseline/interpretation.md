@@ -44,13 +44,18 @@ Nested Loop
 - **Estimates.** Estimated rows equal actual rows at every node: 1, with
   `loops=1` throughout. The `actor` scan removes 36 rows by filter, as
   expected. There is no estimation error.
-- **Cost profile.** Planning time (0.63–1.23 ms) is about 10 times the
-  execution time (0.061–0.148 ms) in every run. Each run is a new backend, so
-  planning includes catalog-cache warm-up: 284–321 planning buffer hits against
-  5 executor buffers. Because the application also opens a new connection per
-  call, planning work is a visible share of this statement's database time.
-  This is an inference from these plans; per-request connection cost itself
-  was not measured.
+- **Cost profile.**
+  - **Observed:** planning time (0.63–1.23 ms) exceeded execution time
+    (0.061–0.148 ms) in every run, by roughly 10 times. Planning touched
+    284–321 buffers, against 5 for execution.
+  - **Not established:** the cause of the gap.
+    - Each run was a new session, and the application also opens a new
+      connection per call.
+    - One possible contributor is first-use catalog lookups in a fresh
+      backend, which the planning buffer counts are consistent with.
+    - Planning cost was not measured within a reused session, so the
+      difference cannot be attributed to fresh connections.
+    - Per-request connection cost was not measured either.
 
 **Context: Query A0** ([`raw/query-a0-actor-status.txt`](raw/query-a0-actor-status.txt)):
 `Seq Scan on actor`, 1 buffer, rows estimated 1 / actual 1. Execution was
@@ -99,16 +104,20 @@ Sort (c.created_at, c.id; quicksort 27kB)                      <- outer ORDER BY
     no `created_at` order, so it would not avoid the sort.
   - There is no parallel plan, although the table exceeds
     `min_parallel_table_scan_size`.
-- **Ordering.** A **top-N heapsort** keeps the first 21 of 40,000 rows by
-  `(created_at, id)` in 27 kB. The query returns 21 rows (20 shown plus the
-  `has_more` probe). An outer quicksort then re-sorts those 21 rows for the
-  statement-level `ORDER BY`, which is negligible.
+- **Ordering.** A **top-N heapsort**:
+  - It processes each of the 40,000 matching rows, comparing it against a
+    bounded heap.
+  - It retains only the best 21 candidates by `(created_at, id)`, in 27 kB.
+  - It does not materialize or fully sort the 40,000 rows.
+  - The query returns 21 rows (20 shown plus the `has_more` probe). An outer
+    quicksort then re-sorts those 21 rows for the statement-level `ORDER BY`,
+    which is negligible.
 - **Work versus result.** Producing 21 rows reads every page of the table and
-  sorts every row of the organization. The work grows with the organization's
-  case count (and with table size, for the scan), not with the page size. This
-  is the main baseline observation. The cause of the warm-run spread (23–46 ms,
-  with identical plans and buffers) was not isolated. It is consistent with
-  VM and CPU-quota noise.
+  passes every one of the organization's rows through the top-N heap. The work
+  grows with the organization's case count (and with table size, for the
+  scan), not with the page size. This is the main baseline observation. The
+  cause of the warm-run spread (23–46 ms, with identical plans and buffers)
+  was not isolated. It is consistent with VM and CPU-quota noise.
 - **Authorization structure.**
   - The `EXISTS` decision appears **twice**: InitPlan 2 for the `authorized`
     output column and InitPlan 3 for the gate inside the lateral subquery.
@@ -122,8 +131,13 @@ Sort (c.created_at, c.id; quicksort 27kB)                      <- outer ORDER BY
 - **Estimates.** The case scan was estimated at 39,993 rows and returned
   40,000. Limit and sorts were estimated and actual at 21. Every
   identity-table node was 1/1. There is no material estimation error.
-- **Buffers.** Run 1 read 2,768 pages from outside `shared_buffers`, with OS
-  cache state unknown. Warm runs hit all 2,777 in `shared_buffers`.
+- **Buffers.**
+  - Run 1 reported `shared read=2768`: PostgreSQL did not find those pages in
+    `shared_buffers` and requested them from the operating system.
+  - A `shared read` is a PostgreSQL buffer read. It does not by itself show
+    physical disk I/O, because the OS/VM page cache may have served it, and
+    `track_io_timing` was off.
+  - Warm runs found all 2,777 in `shared_buffers` (`hit`).
 
 ### Supplementary: same statement, small organization
 
@@ -161,9 +175,10 @@ buffers, verbose, settings) logged:
 | Authorized read | Same as Query A | 0.360 ms; hit=3 read=2 |
 | Authorized list | Same as Query B: `Seq Scan` on `case_record`, top-N heapsort; estimate 39,993 | 42.352 ms; hit=1011 read=1766 |
 
-The client received 20 items with `has_more=True`. The `read=1766` for the
-list follows the restart before the small-organization pass, which cached only
-the ~1,000 pages that pass touched. This confirms that the psql reproduction
+The client received 20 items with `has_more=True`. The `read=1766` (PostgreSQL
+buffer reads, not proven disk reads) for the list follows the restart before
+the small-organization pass, which brought only the ~1,000 pages that pass
+touched into `shared_buffers`. This confirms that the psql reproduction
 plans the application's statements the same way. It is one execution each
 under `auto_explain`'s instrumentation overhead, so it adds no timing
 evidence.
@@ -175,8 +190,8 @@ evidence.
 - Both authorized statements run as written, with their authorization
   predicates evaluated inside the statement.
 - Query A is a primary-key lookup with constant work: 5 buffers.
-- Query B for a large organization scans the whole table and sorts every
-  matching row to return 21.
+- Query B for a large organization scans the whole table and passes every
+  matching row through a top-N heapsort that retains 21.
 - The existing `(organization_id, id)` unique index is chosen only when the
   organization is selective.
 - Row estimates are accurate at this size.
@@ -194,7 +209,7 @@ evidence.
 
 1. **List ordering.** Would an index matching `WHERE organization_id = ?
    ORDER BY created_at, id` let Query B stop after 21 rows instead of scanning
-   and sorting 40,000? What would it cost on insert, and in size, next to the
+   all 40,000 matching rows through the top-N heap? What would it cost on insert, and in size, next to the
    existing `(organization_id, id)` key? Could it make that key's
    query-serving role redundant? It cannot replace the key's foreign-key role.
 2. **Selectivity crossover.** At which organization share does the planner
@@ -207,10 +222,14 @@ evidence.
 4. **Identity lookups at scale.** At what `organization_membership` and
    `actor` sizes do the primary-key indexes replace the one-page sequential
    scans? Does any listing query need `organization_membership(organization_id)`?
-5. **Planning share.** With a new connection per call, planning (about 1 ms)
-   exceeds Query A's execution (about 0.1 ms). Is connection reuse,
-   statement preparation or pooling in scope later, and how should
-   end-to-end read latency be measured separately from these plans?
+5. **Planning share.**
+   - Planning (about 1 ms) was observed to exceed Query A's execution (about
+     0.1 ms) in fresh sessions.
+   - How much of that is fresh-session overhead rather than intrinsic planning
+     cost? This could be measured by repeated planning within one session.
+   - Would connection reuse, statement preparation or pooling change it?
+   - How should end-to-end read latency be measured separately from these
+     plans?
 6. **Layout sensitivity.** How much does physical clustering by organization
    change heap pages per query, compared with this interleaved fixture?
 7. **Measurement design.** Reuse this fixture and method as the "before"

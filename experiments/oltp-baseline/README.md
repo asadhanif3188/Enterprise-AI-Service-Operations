@@ -241,8 +241,12 @@ set `BASELINE_OUT` to another directory. Pin the image by digest
   Query B runs varied from 23 to 46 ms with identical plans and buffer counts.
   Timings show order of magnitude only. Buffer counts and plan shape are the
   stable evidence.
-- **Cache state.** Run 1 is PostgreSQL-cold only (see Method). True cold-disk
-  behavior was not measured.
+- **Cache state.**
+  - Run 1 is PostgreSQL-cold only (see Method). True cold-disk behavior was
+    not measured.
+  - `shared read` counts are PostgreSQL buffer reads requested from the
+    operating system. They do not by themselves show physical disk I/O, because
+    the OS/VM page cache may have served them, and `track_io_timing` was off.
 - **Sampled statistics.** `ANALYZE` samples about 30,000 of the 50,000
   `case_record` rows (default statistics target 100). Estimates can therefore
   vary slightly between rebuilds, for example 39,993 or 40,053 for the large

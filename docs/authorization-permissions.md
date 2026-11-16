@@ -119,7 +119,17 @@ Error bodies never include foreign case data, SQL, credentials, or membership li
 
 ## 6. Proposed test vectors
 
-HTTP vector statuses below refer to tests through the local API against PostgreSQL ([HTTP case API results](../tests/http-case-api-results.md)); each asserts both the HTTP response **and** the database state in the dedicated test database. Organizations A and B and all actors are fictional and created per test.
+HTTP vector statuses below refer to tests through the local API ([HTTP case API results](../tests/http-case-api-results.md)). Organizations A and B and all actors are fictional and created per test.
+
+What each test asserts:
+
+- **HTTP response.** Every HTTP vector test asserts the response.
+- **Test database.** Every executed HTTP vector except V22 is exercised against PostgreSQL in the dedicated test database. V21 is also covered offline. V22 is an offline-only test; see its row. V12 is infeasible and V16 is policy-level only, as their rows state.
+- **Persisted state.** The **State assertion** column is checked against the database only where it describes persisted case rows:
+  - V01, V04 and V05 compare the created case with its database row.
+  - V08–V11, V13–V15, V17 and V18 assert that the case rows and the total case count are unchanged.
+- **Response content.** Entries about rows returned or withheld (V03, V07, V10, V15, V19–V21) are asserted on the HTTP response.
+- **Not checked in the database.** The "No change" entries for the read vectors V02 and V06 are expectations that their tests do not separately check in the database.
 
 **Python-layer equivalents executed** (not HTTP; outcomes are typed exceptions carrying the ADR-0005 status) are recorded in the [case authorization results](../tests/case-authorization-results.md):
 
@@ -150,7 +160,7 @@ HTTP vector statuses below refer to tests through the local API against PostgreS
 | V19 | Invalid credential, plus an `X-Actor-Id` header naming an engineer in A | List A | `401` | Header ignored; no rows | Passed (HTTP) |
 | V20 | Valid engineer-in-A credential, plus spoofed `X-Actor-Id` and `X-Org-Id` headers pointing at B | `GET` a case owned by B; list A | `404`; `200` with A's cases only | The resolved principal and its memberships are unchanged by headers | Passed (HTTP) |
 | V21 | Engineer, active in A | `GET /cases` without `organization_id` | Rejected as invalid | No rows from any organization | Passed (HTTP) |
-| V22 | Engineer, active in A | Any HTTP status change for an A case | No route | `status` and `version` unchanged; not evidence of transition authorization | Passed (HTTP) |
+| V22 | Not applicable. The test sends a well-formed, never-issued token; no actor, organization or case exists. | `PATCH`, `PUT`, `DELETE` and `POST` on `/cases/{id}` (random UUID); `POST /cases/{id}/transitions` and `/cases/{id}/status` | `404` or `405` with `route_not_found` or `method_not_allowed`: no such route | **None.** The offline ASGI test (`test_no_transition_administrative_or_documentation_routes_offline`, configured with an unreachable database) proves only that these HTTP routes are absent. It does not create a case or assert a persisted `status`/`version`, and it does not demonstrate cross-tenant authorization of an update or transition operation, because none is implemented. | Passed (offline ASGI route-absence test; not database-backed) |
 
 ## 7. Explicitly excluded permissions
 
