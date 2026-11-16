@@ -1,8 +1,8 @@
 # eval-v1 manifest
 
-**Status:** 20/20 references FINAL (owner-approved 2026-11-16); rubric v0.2 approved;
-original Day 13 gate **PASS**. Freeze: authorized, to be recorded after this
-approval revision validates (see [Freeze record](#freeze-record)).
+**Status:** **FROZEN** 2026-11-16. 20/20 references FINAL (owner-approved);
+rubric v0.2 approved; original Day 13 gate **PASS**. See the
+[freeze record](#freeze-record). No model run or evaluation results yet.
 
 **Authored:** 2026-11-16 (Asia/Karachi).
 
@@ -277,6 +277,24 @@ authored original material; that does not imply statistical independence.
 
 ## Freeze record
 
-Authorized by AO-001 (approval record 1, decision 8). The freeze is executed in
-a separate revision after this approval revision validates. **Not yet recorded
-in this revision.**
+Authorized by AO-001 (approval record 1, decision 8): freeze once all 20
+references are FINAL and validation succeeds. Both conditions were met at
+approval revision `7173a28` (see the Day 13C run above).
+
+| Field | Value |
+|---|---|
+| Dataset | `eval-v1`, [`eval-v1.jsonl`](eval-v1.jsonl) |
+| Frozen dataset SHA-256 | `4a71f3e7268d15d268b61c10a8993c91e0c5e0d8ff2db60c82c19c411174392f` |
+| Checksum basis | The exact LF-normalized bytes Git stores, e.g. `git show <rev>:evaluations/eval-v1.jsonl \| sha256sum`. A Windows checkout with `core.autocrlf=true` has CRLF on disk, which hashes differently. |
+| Approval revision | `7173a28c35372f61c41274a9254bcadc96c2100d` (`docs: record owner approval and finalize eval-v1 references`) |
+| Freeze revision | The revision that adds this record. The dataset bytes are identical at `7173a28` and here. |
+| Cohort | `eval-v1-001` to `eval-v1-020`: all 20 FINAL. R=20, C=17, U=16. |
+| Approved rubric | v0.2, approved without amendment at `7173a28`. Rubric SHA-256 in the freeze revision: `af003d57b7061edf6878cc219a9572ad357100c07524c9e30ed763f45487e669`. It differs from `7173a28` only in its "Target dataset" status line. |
+| Reviewer decisions | Approval record 1, reviewer `AO-001`, 2026-11-16 (Asia/Karachi) |
+| Superseded provisional checksums | `675016ed…` (reviewed at `16345e5`), `e7b843e0…` (after the 003 refinement). Neither is a freeze checksum. |
+
+Any later change to inputs, labels, spans, statuses or scoring rules requires a
+new dataset version or revision with a change-log entry (change control item 4).
+The frozen bytes must stay reproducible for any reported run. Model execution
+and scoring are a separate, later authorized increment; no predictions, accuracy,
+latency, token, cost or quality results exist for eval-v1.

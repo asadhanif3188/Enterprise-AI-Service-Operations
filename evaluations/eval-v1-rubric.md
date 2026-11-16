@@ -3,7 +3,7 @@
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** APPROVED without amendment by the architecture owner (`AO-001`) on 2026-11-16, Asia/Karachi. 20 FINAL references; no evaluation results
 
-**Target dataset:** [`eval-v1.jsonl`](eval-v1.jsonl) (authored, not frozen)
+**Target dataset:** [`eval-v1.jsonl`](eval-v1.jsonl) (frozen 2026-11-16; see the manifest freeze record)
 
 **Evaluation task:** Initial service-case triage, not case resolution or authorization  
 **Current prompt and output contract:** `triage-v1`; `src/model_adapter.py` (`TriageSuggestion`)  
