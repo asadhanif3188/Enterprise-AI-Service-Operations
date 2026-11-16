@@ -9,12 +9,14 @@ The platform supports a technology service provider that handles support cases f
 
 The current implementation is a **local development system** built on synthetic data:
 
-- A PostgreSQL schema for organizations, service cases, AI suggestions, and case status-transition events ([`db/001_init.sql`](../db/001_init.sql), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql)), with fictional seed data ([`db/seed_dev.sql`](../db/seed_dev.sql)).
+- A PostgreSQL schema for organizations, service cases, AI suggestions, case status-transition events, actor identities and customer access grants, and keyed case-creation records ([`db/001_init.sql`](../db/001_init.sql) to [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql)), with fictional seed data ([`db/seed_dev.sql`](../db/seed_dev.sql)).
 - A Python command-line experiment that requests one triage suggestion from a hosted model and stores it as a suggestion only ([`scripts/run_triage.py`](../scripts/run_triage.py), [`src/model_adapter.py`](../src/model_adapter.py)).
-- A Python case service that creates and reads cases and applies controlled status transitions ([`src/case_service.py`](../src/case_service.py)).
+- Local verification of opaque test credentials ([`src/credential_auth.py`](../src/credential_auth.py)) and a central authorization layer for organization-scoped case creation, reading, and listing ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py)).
+- A localhost-only HTTP API (`POST /cases`, `GET /cases/{id}`, `GET /cases`) that calls only that layer, including keyed idempotent creation ([`src/api/`](../src/api/)).
+- A separate Python case service that creates and reads cases and applies controlled status transitions ([`src/case_service.py`](../src/case_service.py)). It is unauthenticated, and the HTTP API does not call it.
 - Automated tests and recorded evidence for each of these components.
 
-There is no deployed service, application API, user interface, user account, or login. All organizations and cases are fictional.
+There is no deployed service, user interface, production identity provider, or interactive login. Fictional actors are provisioned by a trusted local tool and authenticate to the local HTTP API with opaque test credentials. All organizations, actors, and cases are fictional.
 
 ## 2. System context (C4 Level 1)
 
@@ -22,13 +24,13 @@ There is no deployed service, application API, user interface, user account, or 
 C4Context
     title System context (current implementation)
 
-    Person(operator, "Service operator / engineer", "Investigates service cases, reviews AI triage suggestions, and decides case updates. Currently a developer running local commands; no user accounts exist.")
+    Person(operator, "Service operator / engineer", "Investigates service cases, reviews AI triage suggestions, and decides case updates. Currently a developer running local commands or calling the localhost HTTP API with a test credential; no production accounts exist.")
 
     System(platform, "Enterprise AI Service Operations & Intelligence Platform", "Stores organization-owned service cases, applies controlled status transitions, and records advisory AI triage suggestions.")
 
     System_Ext(modelProvider, "Hosted AI model provider", "External language-model API. OpenAI was used for the recorded experiment.")
 
-    Rel(operator, platform, "Runs setup, triage, and case operations", "Local commands")
+    Rel(operator, platform, "Runs setup and triage; creates, reads, and lists cases", "Local commands; localhost HTTP with a bearer test credential")
     Rel(platform, modelProvider, "Sends synthetic case data; receives a structured triage suggestion", "HTTPS, OpenAI SDK")
 
     UpdateRelStyle(operator, platform, $offsetX="-90", $offsetY="-130")
@@ -37,7 +39,7 @@ C4Context
 
 | Element | C4 type | Role in the current implementation |
 |---|---|---|
-| Service operator / engineer | Person | The intended user is a service engineer who reviews suggestions and decides case updates. Today, the only operator is a developer running local commands against a local database. There is no authentication, and no identity is recorded. |
+| Service operator / engineer | Person | The intended user is a service engineer who reviews suggestions and decides case updates. Today, the operator is a developer working locally. Fictional actors authenticate to the local HTTP API with opaque test credentials; the local commands (case service, triage CLI) have no authentication. There is no production identity provider. |
 | Enterprise AI Service Operations & Intelligence Platform | Software system (in scope) | Owns case data and case-state decisions. Its internal parts, including the PostgreSQL database, are shown in [section 3](#3-technical-boundary-supporting-view), not here. |
 | Hosted AI model provider | External software system | Produces triage suggestions on request. It has no access to the platform's database, and its output is advisory. The recorded experiment requested `gpt-4o-mini` ([`evaluations/model-run-01.json`](../evaluations/model-run-01.json)). |
 
@@ -45,7 +47,7 @@ Customer organizations appear in the system as data (the owning organization of 
 
 ## 3. Technical boundary (supporting view)
 
-This view supports the context diagram above. It is **not** a strict C4 container diagram. It shows the existing Python modules, the PostgreSQL datastore inside the platform boundary, and the external model provider. PostgreSQL is the platform's internal system of record, not a separate external business system.
+This view supports the context diagram above. It is **not** a strict C4 container diagram. It shows the main Python modules, the PostgreSQL datastore inside the platform boundary, and the external model provider. PostgreSQL is the platform's internal system of record, not a separate external business system.
 
 ```mermaid
 flowchart LR
@@ -58,17 +60,20 @@ flowchart LR
             direction TB
             cli["scripts/run_triage.py<br/>AI triage CLI"]
             adapter["src/model_adapter.py<br/>prompt triage-v1 and output contract"]
-            service["src/case_service.py<br/>case service (Python functions)"]
+            api["src/api/<br/>HTTP API on 127.0.0.1:8000"]
+            authz["src/authorized_case_operations.py<br/>credential verification and ADR-0005 authorization"]
+            service["src/case_service.py<br/>case service (Python functions, unauthenticated)"]
             tests["tests/<br/>pytest suites"]
         end
 
         subgraph container["Docker container: eaiso-postgres (PostgreSQL 16)"]
             direction TB
-            devdb[("eaiso_dev<br/>organization, case_record,<br/>ai_suggestion, case_status_event")]
+            devdb[("eaiso_dev<br/>organization, case_record, ai_suggestion,<br/>case_status_event, actor, organization_membership,<br/>case_creation_idempotency")]
             testdb[("eaiso_test<br/>disposable test database")]
         end
 
         envfile["Local .env file (git-ignored)<br/>OPENAI_API_KEY, DATABASE_URL"]
+        credstore[".local/test-credentials.json (git-ignored)<br/>credential digests only"]
         evidence["evaluations/*.json<br/>run evidence files"]
     end
 
@@ -76,6 +81,10 @@ flowchart LR
 
     operator -->|"runs commands"| cli
     operator -->|"runs tests"| tests
+    operator -->|"HTTP with bearer test credential"| api
+    api -->|"every route"| authz
+    authz -->|"verifies digest"| credstore
+    authz -->|"FOR SHARE actor, then membership;<br/>scoped case SQL; idempotency record"| devdb
     cli -->|"reads configuration"| envfile
     cli -->|"case data"| adapter
     adapter -->|"HTTPS request: case fields and instructions"| provider
@@ -84,6 +93,7 @@ flowchart LR
     cli -->|"read case; recheck under FOR SHARE;<br/>INSERT ai_suggestion only"| devdb
     cli -->|"writes new evidence file"| evidence
     tests -->|"call"| service
+    tests -->|"call through HTTP and Python"| authz
     tests -->|"PostgreSQL-backed tests (-m db)"| testdb
     service -->|"FOR UPDATE; version check;<br/>UPDATE case_record + INSERT case_status_event"| testdb
 
@@ -94,6 +104,7 @@ flowchart LR
 Notes on the view:
 
 - **The case service has no entry point of its own.** It is a set of Python functions (`create_case`, `get_case`, `transition_case`) that local Python code can import. So far, only its test suite calls them, against `eaiso_test`. The functions accept any PostgreSQL connection string, including one for `eaiso_dev`.
+- **The HTTP API never calls the case service.** Every route goes through the authorized case operations, and a structural check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py)) forbids route code from importing `src/case_service.py` or querying protected tables. The API reads `DATABASE_URL` and the credential-store path at startup, and its tests run against `eaiso_test`.
 - **The triage CLI and the case service are independent.** The CLI does not call the case service, and the case service does not call the model or read `ai_suggestion`.
 - **Only the triage CLI communicates with the external model**, through `src/model_adapter.py`. The request is made with `max_retries=0`, a 30-second timeout, and `store=False`. The tests simulate provider responses and make no model calls.
 - **Database access** uses psycopg 3 with parameterized queries over `127.0.0.1:5432`. The container port is bound to the local machine only. The local components connect as the development account `eaiso_dev`; no least-privilege application role exists yet.
@@ -111,11 +122,11 @@ These capabilities exist in the repository and have recorded, observed test or e
 | Handling of provider timeout, refusal, and incomplete responses; stale-case rejection; rollback on a database constraint error | [`src/model_adapter.py`](../src/model_adapter.py), [`scripts/run_triage.py`](../scripts/run_triage.py) | [Failure-path validation](../tests/ai-triage-failure-results.md): 18/18 selected tests passed |
 | One hosted-model triage request, with the suggestion stored in `ai_suggestion` and case status and version unchanged | [`scripts/run_triage.py`](../scripts/run_triage.py) | [Recorded run](../evaluations/model-run-01.json): one synthetic case, one run. It is not an evaluation of model accuracy. |
 | Forward-only, version-checked status transitions, with the status update and event insert in one transaction | [`src/case_service.py`](../src/case_service.py), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) | [Case operations validation](../tests/case-operations-results.md): 16/16 tests passed |
-| Centralized case authorization: create, read, and list through one entry point that resolves the credential and enforces the ADR-0005 matrix with locked writes and scoped single-statement reads; structural no-bypass check | [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), [`src/case_authorization.py`](../src/case_authorization.py), [`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py) | [Case authorization](../tests/case-authorization-results.md): 76/76 tests passed (29 PostgreSQL-backed, including revocation interleavings; 47 offline). No HTTP boundary calls it yet. |
-| Local authenticated HTTP case API: `POST /cases`, `GET /cases/{id}`, `GET /cases` on `127.0.0.1` only, bearer credentials, safe error envelope, keyed idempotent creation (ADR-0004), HTTP tenant-isolation tests against PostgreSQL | [`src/api/`](../src/api/), [`scripts/run_local_api.py`](../scripts/run_local_api.py) | [HTTP case API results](../tests/http-case-api-results.md) |
-| Keyed idempotent case creation: `Idempotency-Key` parsed as an RFC 9651 String, RFC 8785 fingerprint version 1, authorization before key lookup, actor-and-organization scope, `201`/`200` replay/`422`/`503` | [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql), [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), [`src/request_fingerprint.py`](../src/request_fingerprint.py), [`src/api/structured_fields.py`](../src/api/structured_fields.py) | [Keyed case creation results](../tests/keyed-case-creation-results.md) |
-| Local opaque credential verification: 256-bit test credentials, digest-only git-ignored store, rotation and revocation, typed 401/403/500-equivalent outcomes | [`src/credential_auth.py`](../src/credential_auth.py), [`scripts/manage_test_credentials.py`](../scripts/manage_test_credentials.py) | [Credential verification](../tests/credential-verification-results.md): 58/58 tests passed (9 PostgreSQL-backed, 49 offline). Identity only; no HTTP boundary calls it. |
-| Actor identity with provider/customer affiliation, customer access grants, ADR-0006 eligibility guards (membership-side and actor-side), and trusted local provisioning with actor-first locking | [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py), [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py) | [Identity and role-grant integrity](../tests/identity-grant-integrity-results.md): 87/87 tests passed (61 PostgreSQL-backed, including concurrency; 26 offline). Not used for request authorization yet. |
+| Centralized case authorization: create, read, and list through one entry point that resolves the credential and enforces the ADR-0005 matrix with locked writes and scoped single-statement reads; structural no-bypass check | [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), [`src/case_authorization.py`](../src/case_authorization.py), [`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py) | [Case authorization](../tests/case-authorization-results.md): 76/76 tests passed (29 PostgreSQL-backed, including revocation interleavings; 47 offline). The local HTTP API calls it for every route. |
+| Local authenticated HTTP case API: `POST /cases`, `GET /cases/{id}`, `GET /cases` on `127.0.0.1` only, bearer credentials, safe error envelope, keyed idempotent creation (ADR-0004), HTTP tenant-isolation tests against PostgreSQL | [`src/api/`](../src/api/), [`scripts/run_local_api.py`](../scripts/run_local_api.py) | [HTTP case API results](../tests/http-case-api-results.md): 95/95 HTTP tests passed when the API was introduced (72 offline, 23 PostgreSQL-backed); later keyed-creation changes are recorded in the keyed results |
+| Keyed idempotent case creation: `Idempotency-Key` parsed as an RFC 9651 String, RFC 8785 fingerprint version 1, authorization before key lookup, actor-and-organization scope, `201`/`200` replay/`422`/`503` | [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql), [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), [`src/request_fingerprint.py`](../src/request_fingerprint.py), [`src/api/structured_fields.py`](../src/api/structured_fields.py) | [Keyed case creation results](../tests/keyed-case-creation-results.md): 143/143 new tests passed (113 offline, 30 PostgreSQL-backed, including real concurrency and lost-commit faults); full suite 528/528 in three runs |
+| Local opaque credential verification: 256-bit test credentials, digest-only git-ignored store, rotation and revocation, typed 401/403/500-equivalent outcomes | [`src/credential_auth.py`](../src/credential_auth.py), [`scripts/manage_test_credentials.py`](../scripts/manage_test_credentials.py) | [Credential verification](../tests/credential-verification-results.md): 58/58 tests passed (9 PostgreSQL-backed, 49 offline). Identity only; the authorization layer calls it on every HTTP request. |
+| Actor identity with provider/customer affiliation, customer access grants, ADR-0006 eligibility guards (membership-side and actor-side), and trusted local provisioning with actor-first locking | [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py), [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py) | [Identity and role-grant integrity](../tests/identity-grant-integrity-results.md): 87/87 tests passed (61 PostgreSQL-backed, including concurrency; 26 offline). The authorization layer reads these tables at request time. |
 
 ### Implemented, but not production-ready
 
@@ -124,7 +135,9 @@ These components work locally within the limits below. They must not be presente
 | Component | Boundary or limitation |
 |---|---|
 | Case service ([`src/case_service.py`](../src/case_service.py)) | `organization_id` filters queries but is supplied by the caller; it is not an authorization check. `actor_label` is caller-supplied text, not a verified identity or approval. The event history covers status transitions made through the service only. Direct database writers can bypass the transition policy. See [Controlled case operations](case-operations.md). |
-| Case creation (`create_case`) | Each successful call inserts a new case. There is no request idempotency, so a retried call creates a second case. See [Case creation semantics](case-creation-semantics.md). |
+| Case creation in the case service (`create_case`) | Each successful call inserts a new case. There is no request idempotency, so a retried call creates a second case. The HTTP API does not use this function. See [Case creation semantics](case-creation-semantics.md). |
+| Local HTTP API and authorization layer ([`src/api/`](../src/api/), [`src/authorized_case_operations.py`](../src/authorized_case_operations.py)) | Localhost-only plain HTTP. Opaque test credentials from a git-ignored local file, not production identity. The development database connection may be a superuser, and there is no row-level security or least-privilege role, so tenant isolation is enforced by the application only. Lists have no cursor pagination. See the [readiness results](../tests/authorization-boundary-readiness-results.md). |
+| Keyed idempotent creation | Idempotency records never expire. Duplicate-safety covers only retries that reuse the same key, actor, organization, and payload; requests without a key create distinct cases. It does not provide exactly-once network delivery. Concurrency evidence comes from tested scenarios, not a proof. |
 | AI triage CLI ([`scripts/run_triage.py`](../scripts/run_triage.py)) | A local experiment over one fixed synthetic case. It makes one model call with no retry, writes one evidence file, and is not a service. See [AI triage integration](ai-triage-integration.md). |
 | Model input handling | The case ID, organization slug, title, description, status, and version are sent to the external provider. There is no redaction or data-classification control, so only synthetic data may be used. |
 | PostgreSQL | A single local Docker container with development-only credentials. There is no least-privilege application role, backup, recovery procedure, or monitoring. |
@@ -137,12 +150,13 @@ These capabilities are required by the [requirements](requirements.md) or archit
 
 | Capability | Requirement or decision |
 |---|---|
-| Human authentication and server-side access checks | FR-02, [DEC-001](architecture-context.md#dec-001--the-application-owns-service-case-data-and-workflow-decisions) |
+| Production human authentication (identity provider, login, credential lifecycle) replacing the local test credentials | FR-02, [DEC-001](architecture-context.md#dec-001--the-application-owns-service-case-data-and-workflow-decisions) |
 | HTTP status transitions, AI-suggestion actions, and human approval over HTTP; verified-actor attribution on cases and events | FR-02 and FR-03; [ADR-0003](adr/0003-application-controlled-case-transitions.md) |
 | Database-enforced tenant isolation (row-level security or a least-privilege runtime role) and production authentication | [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) limits; [readiness results](../tests/authorization-boundary-readiness-results.md) §7 |
 | Cursor pagination for `GET /cases` (the interim response reports `has_more` only) | [API contract](api-contract.md#31-implemented-interim-behavior) |
 | Reviewer approval bound to a specific suggestion version, and execution of approved updates | FR-06, FR-07, [DEC-003](architecture-context.md#dec-003--only-authorized-application-operations-can-change-case-state) |
-| A public or internal application API | Required before any of the above can be offered to users |
+| A deployed (shared or production) application API; the current HTTP API is localhost-only | Required before any capability can be offered to users |
+| The complete AI-assisted workflow through the application: requesting triage, reviewing a suggestion, and applying an approved update | FR-04 to FR-07 |
 | Finite retention, expiry, and cleanup for idempotency records (records never expire in the local demonstration) | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) rule 10 |
 | Complete, attributable case history (creation, edits, review decisions, failures) | FR-03, FR-09 |
 | Manual case-handling workflow when AI is unavailable | FR-08 |
@@ -166,6 +180,12 @@ These capabilities are required by the [requirements](requirements.md) or archit
    2. The service locks the case row (`FOR UPDATE`) and compares the stored version with the expected version.
    3. It checks the transition against the forward-only policy.
    4. In one transaction, it updates `case_record` (incrementing `version`) and inserts a `case_status_event` row. If either step fails, both roll back.
+4. **Authorized case request (local HTTP API).**
+   1. A client sends `POST /cases`, `GET /cases/{id}`, or `GET /cases` to `127.0.0.1:8000` with one bearer test credential.
+   2. The authorization layer verifies the credential against its digest in the git-ignored store and resolves a verified `actor.id`. Identity headers and body fields are never trusted.
+   3. It checks the active actor, the active membership in the target organization, and the role's permission (ADR-0005). Creates hold `FOR SHARE` locks on the actor, then the membership, until commit.
+   4. It runs SQL scoped to the authorized organization. A keyed create reserves `(organization, actor, 'case:create', key)` in `case_creation_idempotency` before inserting the case, and both commit together; a repeat returns an identity-only replay or `422`.
+   5. A denial returns `401`, `403`, or a nondisclosing `404`, without case data.
 
 ### Authority rules
 
@@ -173,33 +193,37 @@ These capabilities are required by the [requirements](requirements.md) or archit
 - **Model output is advisory.** A validated suggestion is stored in `ai_suggestion` and never changes case state. No code path passes a suggestion to `transition_case` ([DEC-002](architecture-context.md#dec-002--the-ai-component-produces-suggestions-not-business-actions)).
 - **The local CLI is the only component that communicates with the external model.** The model has no database credentials or database access.
 - **The local case service applies controlled status transitions.** It enforces the transition policy and version checks for callers that use it; the database does not enforce them.
-- **Human authentication, tenant authorization, reviewer approval, and a public application API remain unimplemented.** No current component may be described as an authorized end-to-end workflow.
+- **The local HTTP API reaches case data only through the authorized case operations.** Application-layer authentication and organization-scoped authorization are implemented for case creation, reading, and listing.
+- **Production authentication, database-enforced tenant isolation, reviewer approval, and a deployed API remain unimplemented.** No current component may be described as an authorized end-to-end workflow.
 
 ### Trust boundaries
 
 | Boundary | What crosses it | Current controls | Not yet controlled |
 |---|---|---|---|
-| Operator to platform | Commands, case IDs, organization IDs, actor labels, case text | Local machine access only; input validation (UUID format, nonblank text, allowed transitions, positive expected version) | Authentication, tenant authorization, verified attribution, approval |
+| Operator to local commands (case service, triage CLI) | Commands, case IDs, organization IDs, actor labels, case text | Local machine access only; input validation (UUID format, nonblank text, allowed transitions, positive expected version) | Authentication, tenant authorization, verified attribution, approval |
+| HTTP client to the local API | Bearer test credential, organization ID, case ID, case text, `Idempotency-Key` | Loopback binding only; exactly one bearer credential, verified against a digest store; ADR-0005 actor, membership, and role checks before any case or key access; strict header, JSON, and body validation; a safe error envelope without secrets | Production identity, TLS, rate limiting, database-enforced isolation, verified attribution on events, approval |
 | Platform to model provider | Outbound: case fields and instructions. Inbound: model response. | HTTPS through the provider SDK; API key held in the git-ignored `.env`; 30-second timeout; prompt marks case text as untrusted; strict output validation; output stored only as a suggestion | Redaction and data-handling controls for real customer data; semantic accuracy of suggestions; provider availability |
-| Application code to PostgreSQL | Parameterized SQL over a local connection | Schema constraints; transactions; row locks; expected-version checks in the case service; role-grant eligibility triggers on `actor` and `organization_membership` | Least-privilege roles; protection against direct writers that bypass the case service; tamper-evident history |
+| Application code to PostgreSQL | Parameterized SQL over a local connection | Schema constraints; transactions; row locks; expected-version checks in the case service; role-grant eligibility triggers on `actor` and `organization_membership`; authorization locks and organization-scoped predicates in the authorized layer; idempotency uniqueness and a deferred ownership foreign key | Least-privilege roles; protection against direct writers that bypass the case service; tamper-evident history |
 
 ## 6. References
 
 **Architecture and design**
 
-- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0006, all Accepted, with alternatives, consequences, and revisit conditions. ADR-0004 is implemented for keyed case creation; ADR-0005 is implemented in Python and exposed through the local HTTP API (tables, credential verification, authorization layer, structural check) but has no HTTP boundary; ADR-0006's schema, guards, and local provisioning are implemented.
+- [Architecture Decision Records](adr/README.md): ADR-0001 to ADR-0006, all Accepted, with alternatives, consequences, and revisit conditions. ADR-0004 is implemented for keyed case creation in the local HTTP API; ADR-0005's tables, credential verification, authorization layer, and structural check are implemented and exposed through the local HTTP API; ADR-0006's schema, guards, and local provisioning are implemented.
 - [Architecture context](architecture-context.md): architecture overview, the original DEC-001 to DEC-003 notes, and the current implementation boundary.
 - [Requirements](requirements.md): functional requirements FR-01 to FR-15 and the rules that must always hold.
 - [Data model](data-model.md): entities, integrity rules, and deferred decisions.
 - [Controlled case operations](case-operations.md): transition policy and trust boundaries.
-- [Case creation semantics](case-creation-semantics.md): current non-idempotent behavior and the proposed idempotency contract.
+- [Case creation semantics](case-creation-semantics.md): distinct creation without a key, and the implemented keyed idempotency contract.
+- [API contract](api-contract.md) and [authentication and authorization sequence](authentication-authorization-sequence.md): the local HTTP API and its request sequence.
 - [AI triage integration](ai-triage-integration.md): the suggestion-only integration boundary.
 - [AI triage failure-path validation](ai-triage-failure-testing.md): failure scenarios and test setup.
 
 **Source code**
 
 - [`src/case_service.py`](../src/case_service.py), [`src/model_adapter.py`](../src/model_adapter.py), [`scripts/run_triage.py`](../scripts/run_triage.py).
-- [`db/001_init.sql`](../db/001_init.sql), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql), [`db/seed_dev.sql`](../db/seed_dev.sql).
+- [`src/api/`](../src/api/), [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), [`src/case_authorization.py`](../src/case_authorization.py), [`src/credential_auth.py`](../src/credential_auth.py), [`src/request_fingerprint.py`](../src/request_fingerprint.py).
+- [`db/001_init.sql`](../db/001_init.sql), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql), [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql), [`db/seed_dev.sql`](../db/seed_dev.sql).
 
 **Recorded evidence**
 
@@ -207,3 +231,5 @@ These capabilities are required by the [requirements](requirements.md) or archit
 - [First model run](../evaluations/model-run-01.json): one recorded hosted-model run.
 - [AI triage failure-path results](../tests/ai-triage-failure-results.md): 18/18 selected tests passed.
 - [Case operations results](../tests/case-operations-results.md): 16/16 tests passed.
+- [Identity and role-grant integrity results](../tests/identity-grant-integrity-results.md), [credential verification results](../tests/credential-verification-results.md), [case authorization results](../tests/case-authorization-results.md), and [authorization boundary readiness results](../tests/authorization-boundary-readiness-results.md).
+- [HTTP case API results](../tests/http-case-api-results.md) and [keyed case creation results](../tests/keyed-case-creation-results.md).

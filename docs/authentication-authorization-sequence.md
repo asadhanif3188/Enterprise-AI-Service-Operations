@@ -7,8 +7,7 @@
 - the authorization policy ([`src/case_authorization.py`](../src/case_authorization.py));
 - the authorized-case-operations layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [section 7.1](#71-implemented-authorized-case-operations));
 - the structural no-bypass check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py));
-- the localhost-only HTTP API ([`src/api/`](../src/api/); [section 7.2](#72-implemented-local-http-api)), with HTTP tenant-isolation tests against PostgreSQL and server-generated request IDs.
-
+- the localhost-only HTTP API ([`src/api/`](../src/api/); [section 7.2](#72-implemented-local-http-api)), with HTTP tenant-isolation tests against PostgreSQL and server-generated request IDs;
 - keyed idempotent creation ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md); [results](../tests/keyed-case-creation-results.md)), with authorization before every key lookup.
 
 **Not implemented:** cursor pagination, HTTP status transitions, production authentication, finite idempotency-record retention, and database-enforced tenant isolation.
@@ -144,7 +143,7 @@ The diagram shows **logical order**. It does not claim that a separate policy qu
 
 ### 5.1 Implemented local credential resolver
 
-[`src/credential_auth.py`](../src/credential_auth.py) implements the resolver; [`scripts/manage_test_credentials.py`](../scripts/manage_test_credentials.py) is the operator tool. Observed results are in the [credential verification results](../tests/credential-verification-results.md). It establishes **identity only**: it does not read memberships, roles, or organizations, and no HTTP route calls it yet.
+[`src/credential_auth.py`](../src/credential_auth.py) implements the resolver; [`scripts/manage_test_credentials.py`](../scripts/manage_test_credentials.py) is the operator tool. Observed results are in the [credential verification results](../tests/credential-verification-results.md). It establishes **identity only**: it does not read memberships, roles, or organizations. The authorized-case-operations layer (section 7.1) calls it, and every HTTP route goes through that layer.
 
 **Credential format.** `eaiso_test_` followed by `secrets.token_urlsafe(32)`: 256 random bits as 43 base64url characters. The prefix makes test credentials recognizable to secret scanners. Anything that is not exactly this canonical form is rejected as malformed before any lookup.
 
@@ -260,7 +259,7 @@ These predicates are the same as [policy §4](authorization-permissions.md#4-pol
 | No membership, inactive membership, or role lacks the permission, on create or list | `403`, no rows, no membership details |
 | Unknown role value | Denied; treated as having no permissions |
 | Unknown, foreign, or unreadable case on `GET /cases/{id}` | Identical generic `404` status and body |
-| Database outage or policy-evaluation error | **Fail closed:** no protected operation. Generic `500` with a correlation ID, per the [API contract error table](api-contract.md#8-proposed-error-contract). Never a fabricated `403` or `404`, and never a fallback to unscoped SQL. |
+| Database outage or policy-evaluation error | **Fail closed:** no protected operation. Generic `500` with a correlation ID, per the [API contract error table](api-contract.md#8-error-contract). Never a fabricated `403` or `404`, and never a fallback to unscoped SQL. |
 
 **Logging:** record a correlation ID, the verified actor reference where appropriate, the action, the decision, and a sanitized category. Never log credentials, case descriptions, or untrusted headers as identity. Audit and attribution requirements remain **OPEN** ([policy §8](authorization-permissions.md#8-open-issues)).
 
@@ -394,7 +393,7 @@ A single statement does not fully close the gap either. Each PostgreSQL statemen
 - error mapping;
 - contention.
 
-The contract's behavior under concurrency is **untested**. Never hold locks across model calls, long-running work, or client I/O.
+These were later exercised with real PostgreSQL sessions: revocation ordering in the [case authorization results](../tests/case-authorization-results.md), deadlock and commit failure in the [readiness results](../tests/authorization-boundary-readiness-results.md), and the bounded idempotency wait in the [keyed case creation results](../tests/keyed-case-creation-results.md). That is scenario evidence, not proof of race freedom. Never hold locks across model calls, long-running work, or client I/O.
 
 ## 9. Requester create-only and idempotent replay
 

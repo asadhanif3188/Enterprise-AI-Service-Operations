@@ -1,17 +1,17 @@
 # ADR-0006: Actor Affiliation and Role-Grant Eligibility
 
-- **Status:** Accepted (2026-11-15). The architecture owner approved the **design** after architectural review. Acceptance is not an implementation guarantee: nothing is implemented, and no test evidence exists.
+- **Status:** Accepted (2026-11-15). The architecture owner approved the **design** after architectural review. Acceptance is not an implementation guarantee: at acceptance, nothing was implemented and no test evidence existed. Later implementation status is referenced under Implementation evidence.
 - **Recorded:** 2026-11-15
 - **Decision provenance:** Contemporary proposal. It follows the provider/customer distinction documented on 2026-11-15 in [Actor and Organization Membership, §10](../identity-model.md#10-provider-affiliation-vs-customer-access-grants).
   - Proposed on 2026-11-15, then accepted the same day, with the choices listed under Revisit When.
-  - No implementation, test, or measured comparison supports it yet.
+  - At acceptance, no implementation, test, or measured comparison supported it.
 - **Related requirements:** FR-01 and FR-02; rules "Organization ownership" and "Auditability"; quality requirement "Security" ([requirements](../requirements.md))
 - **Related decisions:**
   - [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) (Accepted): permissions and request-time enforcement.
   - [ADR-0004](0004-keyed-idempotent-case-creation.md) (Accepted): actor- and organization-scoped idempotency.
   - This ADR supersedes neither.
 - **Implementation evidence:** None at acceptance (2026-11-15). As the [ADR process](README.md#accepted-is-not-implemented) requires, later implementation status is kept in living documents: see the [identity model, §12](../identity-model.md#12-implementation-status).
-  - No `actor` table, `organization_membership` table, affiliation columns, provisioning path, eligibility trigger, or eligibility test exists.
+  - At acceptance, no `actor` table, `organization_membership` table, affiliation columns, provisioning path, eligibility trigger, or eligibility test existed. They were added afterwards in [`db/003_actor_identity_and_grants.sql`](../../db/003_actor_identity_and_grants.sql), with [recorded test results](../../tests/identity-grant-integrity-results.md).
   - [`db/001_init.sql`](../../db/001_init.sql) defines only the customer `organization` table, `case_record`, and `ai_suggestion`.
 
 ## Problem

@@ -1,9 +1,9 @@
 # Case Authorization — Minimum Role-Permission Policy
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Implemented in a Python authorization layer and exposed through a localhost-only HTTP API** ([HTTP results](../tests/http-case-api-results.md)). The policy is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). The permission matrix is in [`src/case_authorization.py`](../src/case_authorization.py), and it is enforced by the authorized-case-operations layer in [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), which resolves the caller's credential with [`src/credential_auth.py`](../src/credential_auth.py) and reads `actor` and `organization_membership`. Python-level PostgreSQL-backed tests passed ([case authorization results](../tests/case-authorization-results.md)). **No HTTP endpoint exists**, and the HTTP test vectors in section 6 have not been executed.  
+**Status:** **Implemented in a Python authorization layer and exposed through a localhost-only HTTP API** ([HTTP results](../tests/http-case-api-results.md)). The policy is **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (2026-11-15). The permission matrix is in [`src/case_authorization.py`](../src/case_authorization.py), and it is enforced by the authorized-case-operations layer in [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), which resolves the caller's credential with [`src/credential_auth.py`](../src/credential_auth.py) and reads `actor` and `organization_membership`. Python-level PostgreSQL-backed tests passed ([case authorization results](../tests/case-authorization-results.md)). The HTTP test vectors in section 6 were executed through the local API against PostgreSQL ([HTTP results](../tests/http-case-api-results.md)).  
 **Scope:** The minimum organization-scoped permissions for `POST /cases`, `GET /cases/{id}`, and `GET /cases`, as proposed in the [API contract](api-contract.md).  
-**Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. Passing Python-layer tests are not proof of production tenant isolation. ADR-0005 decides where and how the policy is enforced. A proposed enforcement sequence is sketched in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
+**Decision boundary:** This document is the detailed policy behind [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), which is **Accepted**. Passing Python-layer tests are not proof of production tenant isolation. ADR-0005 decides where and how the policy is enforced. The enforcement sequence, with implementation notes, is in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ## 1. Baseline
 
@@ -13,7 +13,7 @@
 - **Governing decisions:**
   - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) require application-controlled access but do not implement it.
   - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md) means AI output never authorizes anything.
-  - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted design, not implemented) scopes idempotency keys to the *authorized* organization and the *verified* actor.
+  - [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted; implemented in the local HTTP API) scopes idempotency keys to the *authorized* organization and the *verified* actor.
 
 This document defines **which** decisions the policy must make. It deliberately does not repeat the entity design or the endpoint contract.
 
@@ -103,7 +103,7 @@ Any missing predicate, lookup failure, or unexpected value results in **deny**. 
 
 ## 5. Suggested HTTP outcomes
 
-These follow the [API contract error table](api-contract.md#8-proposed-error-contract).
+These follow the [API contract error table](api-contract.md#8-error-contract).
 
 | Condition | Outcome | Disclosure rule |
 |---|---|---|
@@ -170,7 +170,7 @@ None of these is resolved by this document.
 - **Revocation timing and the check/use race.** A membership check made separately from the case operation can race with a revocation. Even a single statement uses a snapshot. ADR-0005 accepts a **minimum** contract, not instant revocation: scoped single statements for reads and lists, and short write transactions holding `FOR SHARE` locks on the actor, then the membership. The write-side ordering is implemented and tested with real PostgreSQL sessions; reads are shown not to wait for an uncommitted revocation ([results](../tests/case-authorization-results.md)). Revocation is still not instantaneous for in-flight reads.
 - **Role-grant eligibility.** This policy defines what a granted role may do. Who may *receive* each role, by actor affiliation, is decided separately in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) (Accepted; enforced when grants are written by database guards and provisioning). It adds no request-time predicate and does not change this matrix.
 - **Requester case ownership.** There is no creator or requester relation on `case_record`. Requester follow-up access ("view its permitted status") needs its own design.
-- **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** as design but not implemented. Requester create-only itself is implemented in the Python layer:
+- **Idempotent replay for requesters.** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) addresses this. It is **Accepted** and implemented in the authorized case operations and the local HTTP API ([results](../tests/keyed-case-creation-results.md)). Requester create-only is implemented as well. As implemented:
   - every retry is authorized for `case:create` **before** any key lookup;
   - keys are scoped to `(authorized organization_id, verified actor_id, 'case:create', key)`, so another member's key is an independent operation;
   - a replay returns only `id` and `organization_id`, never the case's current state.

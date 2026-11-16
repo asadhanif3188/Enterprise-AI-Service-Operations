@@ -24,7 +24,7 @@ No reopening, skipping states, or no-op transitions are allowed in this initial 
 
 ## Important trust boundaries
 
-**No authentication or tenant authorization:** the supplied `organization_id` filters operations to a specific organization, but the caller controls that input. A user could supply a different organization's ID. This is not a public API and must not be exposed directly to untrusted callers.
+**No authentication or tenant authorization:** the supplied `organization_id` filters operations to a specific organization, but the caller controls that input. A user could supply a different organization's ID. This is not a public API and must not be exposed directly to untrusted callers. The local HTTP API does not call it; it uses the [authorized case operations](authentication-authorization-sequence.md#71-implemented-authorized-case-operations) instead.
 
 **No verified actor identity or approval:** `actor_label` is a caller-supplied diagnostic label (for example `local-synthetic-operator`), not a verified user identity, an approval, or reliable attribution. Consequential case updates must be authorization-gated before a product workflow is claimed.
 
@@ -32,7 +32,7 @@ No reopening, skipping states, or no-op transitions are allowed in this initial 
 
 **Version safety:** transitions use `SELECT ... FOR UPDATE`, check `expected_version`, and increment the version with the update. Other direct database writers can still bypass this service. The existing `scripts/run_triage.py` uses a separate check to reject stale suggestions.
 
-**No idempotent creation:** each successful `create_case` call inserts a new case, so a retried call creates a duplicate. A future create-case API is intended to accept a client-provided idempotency key; this is not implemented. See [Case creation semantics](case-creation-semantics.md).
+**No idempotent creation:** each successful `create_case` call inserts a new case, so a retried call creates a duplicate. The local HTTP API does not use this function: its `POST /cases` goes through the authorized case operations, where a request with an `Idempotency-Key` is deduplicated per key ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md); [results](../tests/keyed-case-creation-results.md)). See [Case creation semantics](case-creation-semantics.md).
 
 **Partial history only:** this table records status transitions made through this service. It does not record case creation, text edits, suggestion reviews, permissions, or failed decisions. It is not a complete audit trail.
 

@@ -1,6 +1,6 @@
 # ADR-0005: Server-Verified Identity and Organization-Scoped Case Authorization
 
-- **Status:** Accepted (2026-11-15). The architecture owner approved the **architecture**. Acceptance is not proof of implementation: no credential resolver, identity tables, policy code, HTTP endpoint, or authorization test exists.
+- **Status:** Accepted (2026-11-15). The architecture owner approved the **architecture**. Acceptance is not proof of implementation: at acceptance, no credential resolver, identity tables, policy code, HTTP endpoint, or authorization test existed. Later implementation status is referenced under Implementation evidence; statements in the body about missing components describe the state at acceptance.
 - **Recorded:** 2026-11-15
 - **Decision provenance:** Contemporary proposal, derived from the [identity model](../identity-model.md), [permission policy](../authorization-permissions.md), and [request sequence](../authentication-authorization-sequence.md).
   - **Finalized at acceptance (2026-11-15):**
@@ -9,7 +9,7 @@
     - the minimum revocation contract and lock order;
     - acceptance of requester create-only.
 - **Related requirements:** FR-01, FR-02, FR-03, FR-09; rules "Organization ownership" and "Auditability"; quality requirement "Security" ([requirements](../requirements.md))
-- **Implementation evidence:** None for authentication or tenant authorization at acceptance (2026-11-15). As the [ADR process](README.md#accepted-is-not-implemented) requires, later implementation status is kept in living documents: see the [authentication sequence, §5.1](../authentication-authorization-sequence.md#51-implemented-local-credential-resolver) and the [identity model, §12](../identity-model.md#12-implementation-status).
+- **Implementation evidence:** None for authentication or tenant authorization at acceptance (2026-11-15). As the [ADR process](README.md#accepted-is-not-implemented) requires, later implementation status is kept in living documents: see the [authentication sequence, §5.1](../authentication-authorization-sequence.md#51-implemented-local-credential-resolver), [§7.1](../authentication-authorization-sequence.md#71-implemented-authorized-case-operations), and [§7.2](../authentication-authorization-sequence.md#72-implemented-local-http-api), and the [identity model, §12](../identity-model.md#12-implementation-status).
   - [`src/case_service.py`](../../src/case_service.py) still filters by a caller-supplied organization ID.
   - Its [tests](../../tests/case-operations-results.md) show that query scoping, **not** authenticated tenant isolation.
 

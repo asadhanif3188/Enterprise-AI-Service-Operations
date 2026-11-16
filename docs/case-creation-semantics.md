@@ -51,7 +51,7 @@ The [case operations validation](../tests/case-operations-results.md) (16/16 pas
 - `test_create_and_read_case` creates and reads back one case.
 - `test_invalid_create_input_rejected` rejects blank text.
 
-Neither submits the same creation request twice. **No database-backed duplicate-creation or idempotency test has been executed**, and the recorded results make no claim about duplicate handling.
+Neither submits the same creation request twice, so those results make no claim about duplicate handling in `create_case()`. Duplicate and idempotency behavior of the authorized keyed path was tested separately against PostgreSQL ([keyed case creation results](../tests/keyed-case-creation-results.md)).
 
 ## 3. Design decision: distinct creation by default, idempotent creation by key
 
@@ -64,7 +64,7 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 | # | Rule |
 |---|---|
 | 1 | **A genuinely new request creates a new case**, even when another case has the same title or description. Content is not request identity. No uniqueness constraint will be added on case title or description. |
-| 2 | **An accidental retry must not create a duplicate business case** once idempotent creation is implemented. |
+| 2 | **An accidental retry must not create a duplicate business case.** Keyed creation provides this for retries that reuse their key (rules 3–8). |
 | 3 | **An optional `Idempotency-Key` header, parsed as an [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651#section-3.3.3) Item whose value must be a String.** This follows the IETF [Idempotency-Key draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/). The **decoded** string is validated against case-sensitive `[A-Za-z0-9._~-]{16,128}`. For example, the wire form `Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"` decodes to the key without quotes. Item parameters are ignored and never form part of the key. A parse failure, a non-String item (such as an unquoted token), or a pattern mismatch is rejected with `400`; the field is never silently ignored. Clients should send high-entropy values such as UUIDv4. Raw keys are never logged. |
 | 4 | **Authorization runs before any key lookup, and the key is scoped to `(authorized organization_id, verified actor_id, 'case:create', exact idempotency_key)`.** The actor comes from a verified, server-controlled credential, and the organization from a successful `case:create` decision. The same key used by another actor in the same organization, or by the same actor in another organization, is an **independent operation**. An unauthorized or revoked actor cannot retrieve any stored idempotency result. |
 | 5 | **Same scope, equal fingerprint: a replay.** No new case is created. The response is `200 OK` with `Location: /cases/{id}`, `Idempotency-Replayed: true`, and a body containing only the immutable `id` and `organization_id`, read from the idempotency record. The case's current description, status, or version is never retrieved or exposed. A replay does not confer `case:read`. |
@@ -141,7 +141,7 @@ RETURNING case_id;
 
 Under READ COMMITTED, the second `INSERT` waits if a concurrent transaction holds an uncommitted record with the same scope. When that transaction finishes, the `INSERT` either returns no row (the other transaction committed) or proceeds (it rolled back).
 
-The wait is bounded and configurable, for example through a lock or statement timeout; its value is set during implementation, from measurement. If the bound expires, the transaction rolls back and the response is a generic `503`. The case insert commits only when its record does, so a losing attempt leaves no case behind.
+The wait is bounded and configurable, for example through a lock or statement timeout; its value was set during implementation, from measurement (2000 ms; section 4). If the bound expires, the transaction rolls back and the response is a generic `503`. The case insert commits only when its record does, so a losing attempt leaves no case behind.
 
 ### How canonicalization is implemented and tested
 
@@ -159,9 +159,7 @@ Implemented as below; conformance results are in the [keyed case creation result
 
 ## 4. Remaining implementation decisions
 
-The architecture is settled by ADR-0004. These choices are left to implementation or measurement and need no new ADR:
-
-Each was settled during implementation:
+The architecture is settled by ADR-0004. These choices were left to implementation or measurement, needed no new ADR, and were each settled during implementation:
 
 - **Bounded wait.** A `lock_timeout` on the reservation statement only, default **2000 ms**, configurable with `EAISO_IDEMPOTENCY_WAIT_MS` (1–9000 ms).
   - **Why 2000 ms:** measured keyed creates took 121 ms at p99 end to end (median 71 ms), so the bound is about 16 times p99 and below the 5 s lock and 10 s statement timeouts.
@@ -183,9 +181,9 @@ These require a separate decision before they change:
 - **Key requirement.** Whether some clients will be required to send a key.
 - **Shared clients.** Whether service principals or shared clients ever need deduplication across actors. That would need a separate design for who owns an operation, and probably a superseding ADR.
 
-## 5. Validation required before a retriable create-case API is enabled
+## 5. Validation required before keyed creation was enabled
 
-A separate validation increment must test the implementation against a dedicated test database and record observed results. As a minimum, it must cover:
+Before keyed creation was enabled, the implementation had to be tested against a dedicated test database, with observed results recorded. As a minimum, the validation covered:
 
 1. **Sequential replay by the same actor.** The same key and payload are submitted twice: exactly one case exists, the first response is `201`, and the second is a `200` replay containing identity only.
 2. **Simultaneous requests in the same scope.** They produce exactly one case and one idempotency record.

@@ -1,4 +1,4 @@
-# Service Case API Contract — Initial Proposal
+# Service Case API Contract
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
 **Status:** **The three endpoints are implemented as a localhost-only API** ([`src/api/`](../src/api/); [HTTP results](../tests/http-case-api-results.md)), on top of the Python authorization layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [results](../tests/case-authorization-results.md)). **Keyed idempotent creation (ADR-0004) is implemented** ([results](../tests/keyed-case-creation-results.md)). **Cursor pagination is not implemented**; its interim behavior is in [section 3.1](#31-implemented-interim-behavior). Not for shared or production deployment.  
@@ -17,7 +17,7 @@ This contract must conform to the following [Architecture Decision Records](adr/
 | [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md) | **Accepted** (2026-11-15); implemented 2026-11-16 | The retry contract for `POST /cases` ([section 5](#5-post-cases--create-a-case-implemented)) follows the accepted design: keys scoped to the authorized organization and the verified actor, an identity-only `200` replay, `422` for a payload mismatch, and `503` after a bounded wait. Implemented and tested against PostgreSQL ([results](../tests/keyed-case-creation-results.md)); duplicate-safety applies only to retries that reuse the key. |
 | [ADR-0005: Server-Verified Identity and Organization-Scoped Case Authorization](adr/0005-server-verified-identity-and-tenant-authorization.md) | **Accepted** (2026-11-15) | Identity, authorization, revocation, and denial outcomes in [section 4](#4-trust-boundary-sequence) follow this decision. Implemented in the Python layer and the local HTTP API, with HTTP-level tenant-isolation results recorded against PostgreSQL. Isolation is application-layer only: no row-level security. |
 
-**Accepted does not mean implemented.** ADR-0001 to ADR-0003 include requirements, such as access control and authorization, that the current code does not meet. See the [system context](system-context.md#4-capability-status) for current capability status.
+**Accepted does not mean implemented.** Some accepted requirements are still unmet; for example, ADR-0003 requires authorization and approval checks before status transitions are exposed, and no transition is exposed. See the [system context](system-context.md#4-capability-status) for current capability status.
 
 ## 2. Existing baseline and boundaries
 
@@ -30,9 +30,9 @@ See the [data model](data-model.md), [controlled case operations](case-operation
 
 The HTTP layer does not call these functions. Every route calls the authorized-case-operations layer, and the structural check forbids route code from importing `src/case_service.py`.
 
-## 3. API design choices (proposed)
+## 3. API design choices
 
-| Decision | Proposed initial rule | Reason |
+| Decision | Rule | Reason |
 |---|---|---|
 | API shape | Resource-oriented JSON over HTTP; no frontend required | Small, reviewable business boundary |
 | Case identifier | Database-generated UUID, unchanged over the case lifecycle | Stable row identity, independent of description or model output |
@@ -74,13 +74,13 @@ flowchart TD
     P -->|Denied| D[Return error without case data]
     P -->|Allowed| S[Scoped case SQL in the authorized layer — IMPLEMENTED]
     S --> DB[(PostgreSQL: case_record, ai_suggestion — EXISTING)]
-    S -.-> H[(Idempotency record — PLANNED for keyed POST)]
+    S --> H[(case_creation_idempotency — IMPLEMENTED for keyed POST)]
     R[Local triage runner — EXISTING] --> M[Model adapter — EXISTING]
     M --> X[External model provider — EXISTING integration]
     R -->|Suggestion only, ai_suggestion| DB
 ```
 
-**Request authority flows** from an authenticated actor, to a verified membership, to a permitted operation, to scoped database access. It never flows from a model response or an untrusted organization identifier. The planned idempotency record is labeled explicitly. The existing local triage runner, not the model adapter, persists non-authoritative suggestions, and it remains separate from HTTP case creation. A detailed proposed request sequence, with per-endpoint decision flows, is in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
+**Request authority flows** from an authenticated actor, to a verified membership, to a permitted operation, to scoped database access. It never flows from a model response or an untrusted organization identifier. Keyed creation writes its idempotency record in the same transaction as the case, after authorization. The existing local triage runner, not the model adapter, persists non-authoritative suggestions, and it remains separate from HTTP case creation. The detailed request sequence, with per-endpoint decision flows and implementation notes, is in [Server-side authentication and authorization sequence](authentication-authorization-sequence.md).
 
 ### Authorization rule (accepted in ADR-0005)
 
@@ -96,7 +96,7 @@ Given a **verified** `actor_id`, an action (`case:create`, `case:read`, or `case
 5. Restrict every SQL read to the authorized scope, for example `WHERE c.id = :case_id AND c.organization_id = :authorized_org_id`. This predicate is defense in depth **after** membership is verified, not a replacement for it.
 6. Do not expose cases or their existence outside the actor's scope. For a single case, return a generic `404` for both nonexistent and inaccessible IDs. For an explicitly requested forbidden organization listing, return `403` without rows. Both outcomes must be tested.
 
-`organization` and `case_record` are implemented. The normalized `actor` and `organization_membership` tables are implemented ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)). The role matrix and the enforcement architecture are **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) and implemented in the Python authorized-case-operations layer, which the local HTTP API calls. The roles come from the [requirements](requirements.md#3-users-and-responsibilities), which leave exact permission rules to be specified before the affected endpoints are implemented.
+`organization` and `case_record` are implemented. The normalized `actor` and `organization_membership` tables are implemented ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)). The role matrix and the enforcement architecture are **accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) and implemented in the Python authorized-case-operations layer, which the local HTTP API calls. The roles come from the [requirements](requirements.md#3-users-and-responsibilities); the exact permission rules are specified in ADR-0005 and the [minimum role-permission policy](authorization-permissions.md).
 
 ## 5. `POST /cases` — create a case (IMPLEMENTED)
 
@@ -232,9 +232,11 @@ Authorization: Bearer <test-token>
 }
 ```
 
+This example shows the target cursor contract. The implemented interim response carries `"has_more": true` or `false` in place of `next_cursor` ([section 3.1](#31-implemented-interim-behavior)).
+
 The list representation omits the full description to avoid unnecessary disclosure, and it is still subject to full access checks. Case-specific requester access is not yet modeled, so blanket listing is not granted to every requester.
 
-## 8. Proposed error contract
+## 8. Error contract
 
 All error responses use a consistent envelope, for example:
 
@@ -330,7 +332,7 @@ Database-mutating tests use the dedicated `eaiso_test` database. The existing ca
 
 ## 12. Next implementation increments
 
-Done: server-controlled identities and memberships; the authorized Python layer; authenticated `GET /cases/{id}`, scoped `GET /cases`, and unkeyed `POST /cases` over local HTTP; HTTP integration tests against `eaiso_test`.
+Done: server-controlled identities and memberships; the authorized Python layer; authenticated `GET /cases/{id}`, scoped `GET /cases`, and unkeyed and keyed idempotent `POST /cases` (ADR-0004) over local HTTP; HTTP integration, concurrency, and lost-commit tests against `eaiso_test`.
 
 Next, each as its own increment:
 

@@ -1,6 +1,6 @@
 # ADR-0004: Keyed Idempotent Case Creation
 
-- **Status:** Accepted (2026-11-15). The architecture owner approved the **design**. Acceptance does not mean implementation: keyed creation is not built, and no idempotency test exists.
+- **Status:** Accepted (2026-11-15). The architecture owner approved the **design**. At acceptance, keyed creation was not built and no idempotency test existed. It was implemented for the local HTTP API on 2026-11-16 (see Implementation evidence). The decision text below is unchanged; its statements about missing implementation describe the state at acceptance.
 - **Recorded:** 2026-11-13
 - **Decision provenance:** Contemporary proposal. It formalizes the design direction first documented in [Case creation semantics, section 3](../case-creation-semantics.md#3-design-decision-distinct-creation-by-default-idempotent-creation-by-key) on 2026-11-13.
   - **Revised while Proposed (2026-11-15):** the key scope changed from `(organization, operation, key)` to `(authorized organization, verified actor, operation, key)`, because of the cross-actor replay risk identified in the [request sequence](../authentication-authorization-sequence.md#9-requester-create-only-and-idempotent-replay). The replay, in-flight, fingerprint, and retention rules were proposed at the same time.
@@ -11,10 +11,11 @@
     - the fingerprint is stored with a format version.
 - **Legacy reference:** [Case creation semantics](../case-creation-semantics.md), section 3
 - **Related requirements:** FR-01, FR-02, FR-11; rules "Organization ownership", "Retries", and "Concurrency"; quality requirements "Security" and "Correctness" ([requirements](../requirements.md))
-- **Implementation evidence:** None for idempotent creation.
-  - [`src/case_service.py`](../../src/case_service.py): `create_case()` inserts a new case on every successful call and remains **non-idempotent**.
-  - [`db/001_init.sql`](../../db/001_init.sql): defines no uniqueness constraint on `case_record` beyond its primary key.
-  - No credential resolver, authorizing API, idempotency table, or keyed-creation test exists.
+- **Implementation evidence:** None at acceptance (2026-11-15). Implemented on 2026-11-16 for the local demonstration; current status is kept in living documents ([case creation semantics](../case-creation-semantics.md), [system context](../system-context.md#4-capability-status)).
+  - [`db/004_case_creation_idempotency.sql`](../../db/004_case_creation_idempotency.sql): the idempotency table, with the full scope as its primary key and a deferred composite foreign key to `case_record (organization_id, id)`.
+  - [`src/authorized_case_operations.py`](../../src/authorized_case_operations.py) (`create_case_keyed`), [`src/request_fingerprint.py`](../../src/request_fingerprint.py), and [`src/api/structured_fields.py`](../../src/api/structured_fields.py): authorization before key reservation, the RFC 8785 fingerprint version 1, and RFC 9651 header parsing, exposed through `POST /cases` in [`src/api/`](../../src/api/). Identity and authorization come from the ADR-0005 implementation.
+  - [Keyed case creation results](../../tests/keyed-case-creation-results.md): the tests listed under Revisit When, executed against PostgreSQL 16, including real concurrency and lost-commit faults and negative controls. This is local, synthetic evidence, not production assurance.
+  - Unchanged: [`src/case_service.py`](../../src/case_service.py) `create_case()` and requests without a key remain **non-idempotent**, and idempotency records never expire.
 
 ## Problem
 

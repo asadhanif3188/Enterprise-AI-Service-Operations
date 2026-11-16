@@ -47,7 +47,7 @@ A Proposed ADR that is abandoned is marked Deprecated with the reason, rather th
 
 ## Accepted is not Implemented
 
-An Accepted ADR records an architectural choice. It does **not** claim that the implementation is complete, that the necessary security controls exist, or that tests have verified the behavior. Some Accepted ADRs in this project describe requirements, such as authorization checks, that the current code does not yet meet. Each ADR states which parts were implemented when it was recorded.
+An Accepted ADR records an architectural choice. It does **not** claim that the implementation is complete, that the necessary security controls exist, or that tests have verified the behavior. Some Accepted ADRs in this project describe requirements, such as approval checks for status transitions, that the current code does not yet meet. Each ADR states which parts were implemented when it was recorded.
 
 Current implementation status is maintained in living documents, not in ADRs:
 
@@ -91,9 +91,9 @@ Evidence shows what was observed under stated, local conditions. It is not a pro
 | [ADR-0001](0001-postgresql-authoritative-case-store.md) | PostgreSQL as the Authoritative Case Store | Accepted | DEC-001 |
 | [ADR-0002](0002-ai-suggestions-non-authoritative.md) | AI Suggestions Are Non-Authoritative | Accepted | DEC-002 |
 | [ADR-0003](0003-application-controlled-case-transitions.md) | Application-Controlled Case State Transitions | Accepted | DEC-003 |
-| [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (2026-11-15; design, not implemented) | [Case creation semantics](../case-creation-semantics.md) §3 |
-| [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Accepted (2026-11-15; design, not implemented) | — |
-| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (2026-11-15) | — |
+| [ADR-0004](0004-keyed-idempotent-case-creation.md) | Keyed Idempotent Case Creation | Accepted (2026-11-15); implemented locally 2026-11-16 | [Case creation semantics](../case-creation-semantics.md) §3 |
+| [ADR-0005](0005-server-verified-identity-and-tenant-authorization.md) | Server-Verified Identity and Organization-Scoped Case Authorization | Accepted (2026-11-15); implemented locally at the application layer | — |
+| [ADR-0006](0006-actor-affiliation-and-role-grant-eligibility.md) | Actor Affiliation and Role-Grant Eligibility | Accepted (2026-11-15); implemented locally | — |
 
 ## Future Architecture Decisions — Not Yet Recorded
 

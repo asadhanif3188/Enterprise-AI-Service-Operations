@@ -1,15 +1,16 @@
 # Actor and Organization Membership — Relational Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** **Schema implemented; authorization not implemented.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md).
+**Status:** **Schema, application-layer authorization, and a local HTTP API implemented.** The surrounding identity and authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), and the affiliation and role-eligibility design in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md).
 - **Implemented:** the `actor` and `organization_membership` tables, the ADR-0006 eligibility guards, and trusted local provisioning ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), [`src/identity_provisioning.py`](../src/identity_provisioning.py)), with PostgreSQL-backed tests that passed in a local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)).
 - **Implemented separately:** local credential verification that resolves an opaque test credential to an `actor.id` ([`src/credential_auth.py`](../src/credential_auth.py); [results](../tests/credential-verification-results.md)).
 - **Implemented separately:** request-time authorization through the authorized-case-operations layer ([`src/authorized_case_operations.py`](../src/authorized_case_operations.py); [results](../tests/case-authorization-results.md)).
-- **Not implemented:** HTTP endpoints. The local case service (`src/case_service.py`) still does not read these tables.
+- **Implemented separately:** a localhost-only HTTP API that calls that layer ([`src/api/`](../src/api/); [results](../tests/http-case-api-results.md)).
+- **Not implemented:** production identity and database-enforced tenant isolation. The local case service (`src/case_service.py`) still does not read these tables.
 
 
 **Scope:** The normalized data model that would let the platform represent which actors belong to which customer organizations, and in which role. Choosing an authentication provider, implementing enforcement, and recording permission-test results are out of scope.  
-**Evidence class:** Sections 3, 4, and 10 describe implemented schema and guards, verified by the recorded tests. The permission matrix, trust flow, and lookup in sections 6–8 remain design only and have not been executed.
+**Evidence class:** Sections 3, 4, and 10 describe implemented schema and guards, verified by the recorded tests. Sections 6–8 present the permission matrix, trust flow, and lookup as design; the implemented layer and its executed tests are in the [case authorization results](../tests/case-authorization-results.md) and the [HTTP case API results](../tests/http-case-api-results.md).
 
 ## 1. Problem statement
 
@@ -45,8 +46,8 @@ It must not add identity, role, or organization-name columns to `case_record` me
 
 [ADR-0001](adr/0001-postgresql-authoritative-case-store.md) and [ADR-0003](adr/0003-application-controlled-case-transitions.md) govern authoritative state and application-controlled operations. [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15, sets the architectural direction for server-verified identity and organization-scoped authorization, and this document is one of its inputs. Acceptance is architectural only:
 
-- the `actor` and `organization_membership` tables now exist (section 12), but nothing uses them to authorize a request;
-- no authentication or authorization mechanism has been built or validated.
+- the tables, credential verification, and application-layer authorization were implemented later and tested (section 12);
+- production identity and database-enforced tenant isolation are not implemented.
 
 ## 2. Entities
 
@@ -58,7 +59,7 @@ It must not add identity, role, or organization-name columns to `case_record` me
 | `case_status_event` | **Implemented** ([`db/002_case_status_events.sql`](../db/002_case_status_events.sql)), unchanged by this design | `id UUID`; `case_id` FK | Status-transition history with a caller-supplied `actor_label` |
 | `actor` | **Implemented** ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) | `id UUID` | Stable internal reference to an application principal; not a credential |
 | `organization_membership` | **Implemented** ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)) | Composite `(actor_id, organization_id)` | One actor's role and active state in one organization (a customer access grant) |
-| `case_creation_idempotency` | Accepted design in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md), not implemented; out of scope here | — | Keyed create-request replay detection |
+| `case_creation_idempotency` | **Implemented** ([`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql); [ADR-0004](adr/0004-keyed-idempotent-case-creation.md)); out of scope here | Composite `(organization_id, actor_id, operation, idempotency_key)` | Keyed create-request replay detection |
 
 `case_status_event.actor_label` is unverified text. Adding an `actor` table does **not** make existing or future labels verified attribution. Linking events to `actor.id` is an open decision (section 11).
 
@@ -192,19 +193,19 @@ Authority flows in one direction: a verified credential, then a verified actor, 
 
 ```mermaid
 flowchart TD
-    C["Client request: Bearer test credential, plus target organization_id or case id"] --> V{"Credential matches server-controlled test configuration? (PLANNED)"}
+    C["Client request: Bearer test credential, plus target organization_id or case id"] --> V{"Credential matches server-controlled test configuration? (IMPLEMENTED: local digest store)"}
     V -->|No| E["401: no data, no header fallback"]
-    V -->|Yes| A["Verified actor.id (PROPOSED)"]
+    V -->|Yes| A["Verified actor.id (IMPLEMENTED)"]
     A --> AA{"actor.is_active?"}
     AA -->|No| D["Deny by default"]
     AA -->|Yes| M{"Active membership in the target organization, from server-owned data?"}
     M -->|No| D
     M -->|Yes| P{"Membership role grants case:create, case:read, or case:list?"}
     P -->|No| D
-    P -->|Yes| S["Case operation restricted to the authorized organization_id (EXISTING service, to be wrapped)"]
+    P -->|Yes| S["Case operation restricted to the authorized organization_id (authorized case operations, IMPLEMENTED)"]
 ```
 
-1. **Authenticate.** A future HTTP boundary verifies a locally configured, test-only opaque credential and resolves it to an `actor.id` from server-controlled configuration. Arbitrary `X-User-Id`, `X-Actor-Id`, or `X-Org-Id` headers, and decoded but unverified tokens, are never identity.
+1. **Authenticate.** The local HTTP API verifies a locally configured, test-only opaque credential and resolves it to an `actor.id` from server-controlled configuration. Arbitrary `X-User-Id`, `X-Actor-Id`, or `X-Org-Id` headers, and decoded but unverified tokens, are never identity.
 2. **Check the actor.** `actor.is_active` must be true.
 3. **Determine the target organization.**
    - For `POST /cases` and `GET /cases`, the client nominates `organization_id`. This only selects the target and **grants nothing**.
@@ -250,18 +251,18 @@ WHERE a.id = $1
   - short READ COMMITTED write transactions that lock the actor, then the membership, `FOR SHARE`;
   - no cached decisions.
 
-  The contract is untested. These options and their PostgreSQL lock semantics are compared in the [authentication and authorization sequence](authentication-authorization-sequence.md#8-checkuse-timing-and-revocation).
+  The write-side ordering was later tested with real PostgreSQL sessions ([case authorization results](../tests/case-authorization-results.md)); that is scenario evidence, not proof of race freedom. These options and their PostgreSQL lock semantics are compared in the [authentication and authorization sequence](authentication-authorization-sequence.md#8-checkuse-timing-and-revocation).
 - **Row-level security** in PostgreSQL remains optional defense in depth. It does not replace a verified actor.
 
 ## 8. Provisional permissions
 
-These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-accepted-in-adr-0005). They are **not** an implementation and have not been tested. The detailed policy proposal, including predicates, HTTP outcomes, and proposed test vectors, is in [Case authorization — minimum role-permission policy](authorization-permissions.md).
+These permissions match the [API contract authorization rule](api-contract.md#authorization-rule-accepted-in-adr-0005). They are implemented in [`src/case_authorization.py`](../src/case_authorization.py) and tested ([case authorization results](../tests/case-authorization-results.md), [HTTP case API results](../tests/http-case-api-results.md)). The detailed policy, including predicates, HTTP outcomes, and test vectors, is in [Case authorization — minimum role-permission policy](authorization-permissions.md).
 
 | Membership state and role | `case:create` | `case:read` | `case:list` | Status transition over HTTP |
 |---|---|---|---|---|
 | Active `service_engineer` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
 | Active `service_manager` | Allow in member organization | Allow in member organization | Allow in member organization | Not exposed |
-| Active `requester` | Allow in member organization only (create-only; [accepted in ADR-0005](authorization-permissions.md#requester-create-only-accepted-in-adr-0005), not implemented) | Deny until per-case requester ownership is modeled | Deny | Not exposed |
+| Active `requester` | Allow in member organization only (create-only; [accepted in ADR-0005](authorization-permissions.md#requester-create-only-accepted-in-adr-0005), implemented) | Deny until per-case requester ownership is modeled | Deny | Not exposed |
 | `platform_administrator` without an explicit, separately decided delegation | No implicit access | No implicit access | No implicit access | No implicit access |
 | No membership in the target organization | Deny | Deny (nondisclosing `404`) | Deny (`403`) | Deny |
 | Inactive actor, inactive membership, or unrecognized role | Deny | Deny | Deny | Deny |
@@ -281,13 +282,13 @@ References: [PostgreSQL 16 UUID type](https://www.postgresql.org/docs/16/datatyp
 
 ## 10. Provider Affiliation vs Customer Access Grants
 
-**Status:** **Accepted in ADR-0006 (2026-11-15). Schema, database guards, and trusted local provisioning implemented; request-time authorization not implemented.**
+**Status:** **Accepted in ADR-0006 (2026-11-15). Schema, database guards, and trusted local provisioning implemented; request-time authorization is implemented separately in the authorized case operations (ADR-0005).**
 
 - **Accepted design:** the affiliation model (Option B) and the role-eligibility invariant are **accepted** in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md). ADR-0006 owns the decision rationale and the eligibility rules; this section explains the entities and the schema alternatives.
 - **Implemented schema:** the `actor` columns and `actor_affiliation_consistent`, and the `organization_membership` relation ([`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql)).
 - **Implemented enforcement:** provisioning validation ([`src/identity_provisioning.py`](../src/identity_provisioning.py)) and the PostgreSQL guards `organization_membership_role_eligible` and `actor_grants_remain_eligible` (section 10.7).
 - **Observed tests:** schema, eligibility, provisioning, and concurrency tests passed against PostgreSQL 16 in one local environment ([identity and role-grant integrity results](../tests/identity-grant-integrity-results.md)). This is not a proof of race freedom.
-- **Request time:** the authorized-case-operations layer reads active grants and roles (ADR-0005); affiliation is not a request-time predicate. No HTTP boundary exists.
+- **Request time:** the authorized-case-operations layer reads active grants and roles (ADR-0005); affiliation is not a request-time predicate. The local HTTP API reaches these tables only through that layer.
 
 - It does not change the accepted authorization contract in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md).
 - Nothing in this section is a permission.
@@ -415,7 +416,7 @@ Three layers must not be confused:
 
 | Layer | Content | Status |
 |---|---|---|
-| **1. Role permissions** | What each role may do once granted: engineer and manager create, read, and list; requester create only; no implicit platform-administrator access; an active actor and membership are required | **Accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); not implemented |
+| **1. Role permissions** | What each role may do once granted: engineer and manager create, read, and list; requester create only; no implicit platform-administrator access; an active actor and membership are required | **Accepted** in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md); **implemented** in the authorized case operations; tested |
 | **2. Role eligibility** | Who may be **assigned** each role. The full matrix is in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md); in summary:<br>• provider actors may hold `service_engineer` or `service_manager` grants, but no `requester` grants;<br>• customer actors may hold only `requester`, and only for their `home_organization_id`;<br>• customer actors never gain engineer or manager privileges;<br>• platform administrators get no implicit grants | **Accepted** in ADR-0006; **implemented** in migration 003 and provisioning; tested |
 | **3. Enforcement** | Where eligibility would be checked | Approach **accepted** in ADR-0006 and **implemented**: controlled provisioning, plus membership-side and actor-side database guards with actor-first locking. Observed test results are recorded separately. No least-privilege database role exists. |
 
@@ -473,7 +474,7 @@ Observed results, including concurrency scenarios and the remaining limitations,
   - how `actor` relates to future identity-provider subjects;
   - how service-to-service principals are represented.
 - Membership changes:
-  - verification of the full request-time revocation contract accepted in ADR-0005 (section 7) once request-time authorization exists. A provisioning-side test shows revocation waiting for in-flight `FOR SHARE` locks;
+  - verification of the full request-time revocation contract accepted in ADR-0005 (section 7). The write-side ordering is tested in the [case authorization results](../tests/case-authorization-results.md); revocation is still not instantaneous for in-flight reads. A provisioning-side test shows revocation waiting for in-flight `FOR SHARE` locks;
   - whether hard deletion of a membership row should be forbidden at the database level (provisioning only deactivates);
   - whether membership changes need a history relation and an `updated_at` column.
 - Roles:
@@ -481,14 +482,14 @@ Observed results, including concurrency scenarios and the remaining limitations,
   - how requester-owned single-case access will be modeled.
 - Platform administrators: platform-wide administration, and any delegated access to customer data.
 - Enforcement:
-  - how the structural no-bypass check is implemented. The central enforcement layer and transaction boundaries are accepted in ADR-0005.
+  - whether the structural no-bypass check, now a static check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py)), needs database controls alongside it (below). The central enforcement layer and transaction boundaries are accepted in ADR-0005 and implemented.
 - `case_status_event`: whether events gain a verified `actor_id` reference, and what happens to existing `actor_label` values.
 - Case assignment: how an engineer is assigned to a case.
 - Database controls:
   - optional row-level security;
   - a least-privilege application database role.
 - Indexes beyond the primary keys, chosen from measured query plans.
-- An ADR for actor identity and tenant authorization, comparing alternatives. This is [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15 as architecture and not implemented. This document itself accepts nothing.
+- An ADR for actor identity and tenant authorization, comparing alternatives. This is [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), **Accepted** on 2026-11-15 and later implemented at the application layer (section 12). This document itself accepts nothing.
 
 ## 12. Implementation status
 
@@ -498,26 +499,25 @@ Observed results, including concurrency scenarios and the remaining limitations,
 - [`src/identity_provisioning.py`](../src/identity_provisioning.py) and [`scripts/provision_dev_identities.py`](../scripts/provision_dev_identities.py): trusted local provisioning and the fictional scenario;
 - [`tests/test_identity_grants.py`](../tests/test_identity_grants.py): offline and PostgreSQL-backed schema, eligibility, provisioning, and concurrency tests, with results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-**Authorization:** the authorized-case-operations layer enforces the permission matrix against these tables, with PostgreSQL-backed tests ([results](../tests/case-authorization-results.md)). **Not implemented:** an HTTP boundary. The local case service still treats `organization_id` as a caller-supplied query filter, and a superuser or a writer that disables triggers can bypass the guards.
+**Authorization:** the authorized-case-operations layer enforces the permission matrix against these tables, with PostgreSQL-backed tests ([results](../tests/case-authorization-results.md)), and the localhost-only HTTP API calls that layer ([results](../tests/http-case-api-results.md)). **Not implemented:** production identity and database-enforced tenant isolation. The local case service still treats `organization_id` as a caller-supplied query filter, and a superuser or a writer that disables triggers can bypass the guards.
 
 The authorization architecture is accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md). Later increments would add:
 
-- server-side credential resolution and policy code;
-- HTTP integration tests with observed results;
+- production identity and database-enforced tenant isolation, each as a separate decision;
 - any further schema as new forward-only migrations (historical migrations are never edited).
 
 ## 13. Document review checklist
 
 These are documentation-review items, not executed tests. A checked box means the statement was verified by inspecting this document, the migrations, ADR-0005, ADR-0006, the permission policy, and the API contract on 2026-11-15. Executed test results are recorded separately in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md).
 
-- [x] `actor` and `organization_membership` are described as implemented schema with database guards and trusted provisioning, and no text claims that request-time authorization or tenant isolation exists.
+- [x] `actor` and `organization_membership` are described as implemented schema with database guards and trusted provisioning. Request-time authorization is described as application-layer only, and no text claims database-enforced tenant isolation (revised 2026-11-16).
 - [x] Column names and constraints cited match [`db/001_init.sql`](../db/001_init.sql), [`db/002_case_status_events.sql`](../db/002_case_status_events.sql), and [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql).
 - [x] One actor can hold independently active memberships with different roles in several organizations.
 - [x] The composite key `(actor_id, organization_id)` is justified only by the one-role-per-organization assumption, and the consequence of dropping that assumption is stated.
 - [x] Authentication, membership representation, and enforcement are kept distinct. `display_name` and request headers are never treated as identity.
 - [x] A client-supplied organization ID can only narrow scope. A missing, inactive, or unrecognized membership, role, or actor is denied.
 - [x] Requesters receive no general read or list permission, and platform administrators receive no implicit access to customer data.
-- [x] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is marked untested.
+- [x] The check/use race is flagged, and the minimum revocation contract in ADR-0005 is described with its scenario-based test evidence, not as proven race-free (revised 2026-11-16).
 - [x] Relative links resolve, and the role vocabulary matches the [API contract](api-contract.md).
 - [x] Section 10 does all of the following:
   - keeps ABC out of the customer-tenant table, and never describes ABC staff as employees of their assigned customers;

@@ -2,7 +2,7 @@
 
 An independently developed application for exploring how AI-assisted service operations can be designed, built, and operated with sound software engineering practices.
 
-**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. Actor identities and customer access grants are stored with database-enforced role-grant eligibility, a local module verifies opaque test credentials, and a central Python authorization layer enforces organization-scoped create, read, and list permissions. No HTTP API calls it yet. The authenticated application API, human-review workflow, tenant authorization, and broader operational capabilities are not yet implemented.
+**Project status:** Early development. The initial PostgreSQL schema and synthetic development data are implemented, and database integrity validation passed 11/11 checks. A local Python AI triage integration is implemented, and one hosted-model inference has been recorded successfully. A local case service applies forward-only status transitions with version checks and transactional event history. Actor identities and customer access grants are stored with database-enforced role-grant eligibility, a local module verifies opaque test credentials, and a central Python authorization layer enforces organization-scoped create, read, and list permissions. A localhost-only HTTP API exposes those three operations through that layer, with bearer test credentials and keyed idempotent case creation. The local case service remains unauthenticated and is not exposed over HTTP. Human review and approval, production identity, database-enforced tenant isolation, the complete AI-assisted workflow, deployment, and broader operational capabilities are not implemented.
 
 ## The problem
 
@@ -54,10 +54,10 @@ No real customer data or private third-party project materials are used.
 - [x] Complete and publish database integrity tests — [11/11 checks passed](tests/schema-integrity-results.md).
 - [x] Record and validate a real-model triage response — [one synthetic-case run recorded](evaluations/model-run-01.json).
 - [x] Validate AI triage output and failure paths — [18/18 selected tests passed](tests/ai-triage-failure-results.md).
-- [x] Implement version-checked case transitions with event history in a local service — [16/16 tests passed](tests/case-operations-results.md) (8 PostgreSQL-backed, 8 offline policy). This is not yet an authenticated or authorized API.
-- [x] Implement the actor identity schema, provider/customer role-grant eligibility guards, and trusted local provisioning — [87/87 tests passed](tests/identity-grant-integrity-results.md) (61 PostgreSQL-backed, including concurrency; 26 offline). These tables are not yet used for authorization.
-- [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary uses it yet.
-- [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). This is a Python boundary, not yet an HTTP API.
+- [x] Implement version-checked case transitions with event history in a local service — [16/16 tests passed](tests/case-operations-results.md) (8 PostgreSQL-backed, 8 offline policy). This service is unauthenticated and is not exposed over HTTP.
+- [x] Implement the actor identity schema, provider/customer role-grant eligibility guards, and trusted local provisioning — [87/87 tests passed](tests/identity-grant-integrity-results.md) (61 PostgreSQL-backed, including concurrency; 26 offline). The case authorization layer below reads these tables.
+- [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). The case authorization layer and the HTTP API below use it.
+- [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). It is exposed over HTTP by the local API below.
 - [x] Independently validate the integrated identity and authorization boundary before HTTP work — [security-readiness results](tests/authorization-boundary-readiness-results.md): adversarial review (no exploitable flaw found in the authorization layer; structural-check gaps fixed), fresh PostgreSQL 16 reproduction, real commit-failure and deadlock tests, and a restricted database-role assessment. Recommendation: go for local HTTP integration, with conditions.
 - [x] Expose the authorized case operations through a localhost-only HTTP API (`POST /cases`, `GET /cases/{id}`, `GET /cases`) — [HTTP case API results](tests/http-case-api-results.md): bearer authentication, safe error envelope, and HTTP tenant-isolation tests against PostgreSQL. Cursor pagination, HTTP status transitions, and database-enforced isolation are not implemented; this is a local demonstration, not a deployable service.
 - [x] Implement keyed idempotent case creation (ADR-0004) — [keyed case creation results](tests/keyed-case-creation-results.md): RFC 9651 `Idempotency-Key` parsing, RFC 8785 fingerprints, authorization before key lookup, actor-and-customer key scope, atomic case-and-record commit, `201`/`200` replay/`422`/`503`, and real concurrency and lost-commit tests against PostgreSQL. Records never expire (local demonstration only).
@@ -83,7 +83,7 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [AI triage failure-path validation](docs/ai-triage-failure-testing.md) — failure scenarios, test setup, and known limitations.
 - [Failure-path validation results](tests/ai-triage-failure-results.md) — observed offline and PostgreSQL-backed test results.
 - [Controlled case operations](docs/case-operations.md) — local case service, transition policy, trust boundaries, and test setup.
-- [Case creation semantics](docs/case-creation-semantics.md) — current non-idempotent case creation and the proposed idempotency-key contract (not yet implemented).
+- [Case creation semantics](docs/case-creation-semantics.md) — distinct creation without a key, the implemented keyed idempotent creation (ADR-0004), and its transaction design.
 - [Actor and organization membership model](docs/identity-model.md) — identity, affiliation, and customer access grants: schema, eligibility guards, Python-layer authorization, and a local HTTP API.
 - [Local credential verification](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver) — opaque test credential format, digest store, outcomes, rotation and revocation, and limitations.
 - [Case authorization](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) — the authorized-case-operations layer, outcomes, and structural no-bypass check.
@@ -100,7 +100,7 @@ Architecture decisions, test evidence, evaluation results, and operating instruc
 
 ## Local development: PostgreSQL
 
-The application services are not yet available. The PostgreSQL development database can be initialized using the migration and synthetic seed scripts below. These instructions cover the database foundation, not the complete application.
+These steps initialize the local PostgreSQL database used by the case service, the AI triage CLI, and the [local HTTP case API](#local-development-http-case-api). They set up a local development environment, not a deployed application.
 
 The commands below assume Docker is installed and running, and that you are executing them from the repository root. The commands work in PowerShell or a Bash-compatible shell.
 
@@ -138,9 +138,11 @@ docker cp db/002_case_status_events.sql eaiso-postgres:/tmp/002_case_status_even
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/002_case_status_events.sql
 docker cp db/003_actor_identity_and_grants.sql eaiso-postgres:/tmp/003_actor_identity_and_grants.sql
 docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/003_actor_identity_and_grants.sql
+docker cp db/004_case_creation_idempotency.sql eaiso-postgres:/tmp/004_case_creation_idempotency.sql
+docker exec -it eaiso-postgres psql -U eaiso_dev -d eaiso_dev -v ON_ERROR_STOP=1 -f /tmp/004_case_creation_idempotency.sql
 ```
 
-`001_init.sql` creates `organization`, `case_record`, and `ai_suggestion`. `002_case_status_events.sql` adds `case_status_event`, the status-transition history used by the [local case service](docs/case-operations.md). `003_actor_identity_and_grants.sql` adds `actor` and `organization_membership` with role-grant eligibility guards ([identity model](docs/identity-model.md#107-the-first-identity-migration-implemented)). **Do not rerun a migration against a database where it has already been applied.**
+`001_init.sql` creates `organization`, `case_record`, and `ai_suggestion`. `002_case_status_events.sql` adds `case_status_event`, the status-transition history used by the [local case service](docs/case-operations.md). `003_actor_identity_and_grants.sql` adds `actor` and `organization_membership` with role-grant eligibility guards ([identity model](docs/identity-model.md#107-the-first-identity-migration-implemented)). `004_case_creation_idempotency.sql` adds `case_creation_idempotency`, the record behind keyed case creation in the [local HTTP API](#local-development-http-case-api) ([keyed case creation results](tests/keyed-case-creation-results.md)). **Do not rerun a migration against a database where it has already been applied.**
 
 If your development database was initialized before `002_case_status_events.sql` existed, check whether the event table is present:
 
@@ -148,7 +150,7 @@ If your development database was initialized before `002_case_status_events.sql`
 docker exec eaiso-postgres psql -U eaiso_dev -d eaiso_dev -c "SELECT to_regclass('public.case_status_event');"
 ```
 
-An empty result means the table is missing: apply only the two `002_case_status_events.sql` commands above. Do not reapply `001_init.sql`. Check for migration 003 the same way with `SELECT to_regclass('public.organization_membership');` and, if it is missing, apply only the two `003_actor_identity_and_grants.sql` commands. The dedicated `eaiso_test` database used by the database-backed tests needs the same migrations; see [Controlled case operations](docs/case-operations.md#running-tests-against-the-dedicated-database) and the [identity test results](tests/identity-grant-integrity-results.md#reproduction).
+An empty result means the table is missing: apply only the two `002_case_status_events.sql` commands above. Do not reapply `001_init.sql`. Check for migration 003 the same way with `SELECT to_regclass('public.organization_membership');` and, if it is missing, apply only the two `003_actor_identity_and_grants.sql` commands. Check for migration 004 with `SELECT to_regclass('public.case_creation_idempotency');` and, if it is missing, apply only the two `004_case_creation_idempotency.sql` commands. The dedicated `eaiso_test` database used by the database-backed tests needs the same migrations; see [Controlled case operations](docs/case-operations.md#running-tests-against-the-dedicated-database) and the [identity test results](tests/identity-grant-integrity-results.md#reproduction).
 
 ### 4. Load synthetic development data
 
@@ -203,7 +205,7 @@ docker start eaiso-postgres
 
 Data persists in the Docker named volume `eaiso_pgdata`. A normal container stop does not delete it. **Do not remove the volume unless you intend to discard local data.**
 
-The SQL migrations establish the relational model and its structural constraints. They do not, by themselves, enforce the application-level transition policy or protect against every concurrent update. The local [case service](docs/case-operations.md) implements version-checked forward transitions and transactional event history, with [16 recorded passing tests](tests/case-operations-results.md). Migration 003 adds database guards so that only ADR-0006-eligible customer access grants can be stored ([87 recorded passing tests](tests/identity-grant-integrity-results.md)). Authentication, tenant authorization, and reviewer approval remain unimplemented, and database clients with unrestricted write access can bypass the service. A superuser, or a writer that disables triggers, can also bypass the guards.
+The SQL migrations establish the relational model and its structural constraints. They do not, by themselves, enforce the application-level transition policy or protect against every concurrent update. The local [case service](docs/case-operations.md) implements version-checked forward transitions and transactional event history, with [16 recorded passing tests](tests/case-operations-results.md). Migration 003 adds database guards so that only ADR-0006-eligible customer access grants can be stored ([87 recorded passing tests](tests/identity-grant-integrity-results.md)). Application-layer authentication and organization-scoped authorization are implemented for case creation, reading, and listing through the [local HTTP API](#local-development-http-case-api); reviewer approval is not. No row-level security or least-privilege database role exists, so database clients with unrestricted write access can bypass both the case service and the authorization layer. A superuser, or a writer that disables triggers, can also bypass the guards.
 
 ## Local development: AI triage
 
@@ -295,7 +297,7 @@ A localhost-only FastAPI application exposes `POST /cases`, `GET /cases/{id}`, a
    .venv\Scripts\python -m pip install -r requirements-api.txt
    ```
 
-2. Apply migrations 001–003, provision identities, and issue a credential as described in [step 4 above](#4-load-synthetic-development-data). The server reads `DATABASE_URL` from the environment or `.env`, and the credential store from `EAISO_CREDENTIALS_FILE` (default `.local/test-credentials.json`). Startup fails if either is missing or invalid.
+2. Apply migrations 001–004, provision identities, and issue a credential as described in [step 4 above](#4-load-synthetic-development-data). The server reads `DATABASE_URL` from the environment or `.env`, and the credential store from `EAISO_CREDENTIALS_FILE` (default `.local/test-credentials.json`). Startup fails if either is missing or invalid.
 
 3. Run the server on the loopback interface only:
 
@@ -314,7 +316,7 @@ A localhost-only FastAPI application exposes `POST /cases`, `GET /cases/{id}`, a
    Invoke-RestMethod "http://127.0.0.1:8000/cases?organization_id=<organization-uuid>&limit=20" -Headers $h
    ```
 
-To make a create safe to retry, send an `Idempotency-Key` header with a quoted, high-entropy value, for example `-Headers @{ Authorization = "Bearer <credential>"; "Idempotency-Key" = '"8e03978e-40d5-43e8-bc93-6894a57f9324"' }`. A retry with the same key and payload returns `200` with the original case's `id` only; a changed payload gets `422`. Without a key, an ambiguous failure followed by a retry can create a duplicate case. Lists report `has_more` but have no cursor. There are no status-transition, approval, or administrative routes.
+To make a create safe to retry, send an `Idempotency-Key` header with a quoted, high-entropy value, for example `-Headers @{ Authorization = "Bearer <credential>"; "Idempotency-Key" = '"8e03978e-40d5-43e8-bc93-6894a57f9324"' }`. A retry with the same key and payload returns `200` with only the original case's `id` and `organization_id`; a changed payload gets `422`. Without a key, an ambiguous failure followed by a retry can create a duplicate case. Lists report `has_more` but have no cursor. There are no status-transition, approval, or administrative routes.
 
 ## Data and evidence
 
