@@ -66,6 +66,7 @@ Identifiers have the form `FDE-C<n>-<AREA>-<NNN>`:
 | ID | Title | Category | Severity | Status | Component | Target milestone |
 |---|---|---|---|---|---|---|
 | [FDE-C1-READ-001](#fde-c1-read-001) | Inconsistent inactive-actor HTTP status under concurrent revocation | Correctness | Low | OPEN — accepted limitation | `GET /cases/{id}` | Transaction and concurrency correctness review |
+| [FDE-C1-IDEM-001](#fde-c1-idem-001) | Unrelated organization-row lock misclassified as in-flight idempotent request | Correctness | Low | OPEN — accepted limitation | `POST /cases` with `Idempotency-Key` | Transaction and concurrency correctness review |
 
 ## 5. Finding records
 
@@ -138,6 +139,70 @@ The outcome determines whether documentation, an ADR revision, or a superseding 
 7. Execute the relevant regression suite and record exact results.
 8. Update documentation or the ADR lifecycle according to the architectural impact.
 9. Close the finding only with verifiable evidence, or explicitly accept the remaining risk.
+
+**Resolution summary:** Not established.  
+**Verification evidence:** Not established.  
+**Closure date:** Not established.
+
+### FDE-C1-IDEM-001
+
+**Unrelated organization-row lock misclassified as in-flight idempotent request**
+
+| Field | Value |
+|---|---|
+| Category | Correctness (API response classification); secondary operability impact (diagnostics and log attribution) |
+| Severity | Low |
+| Status | OPEN — accepted limitation |
+| Discovered | 2026-11-16, during independent sequential and concurrent idempotency validation |
+| Affected component | `POST /cases` with an `Idempotency-Key` header |
+| Affected implementation | [`src/authorized_case_operations.py`](../src/authorized_case_operations.py), method `create_case_keyed()`, reservation phase (`phase = "reserve"`) |
+| Related decision | [ADR-0004](adr/0004-keyed-idempotent-case-creation.md#decision): decision item 8, in-flight requests (bounded wait, then `503`) |
+| Target milestone | Transaction and concurrency correctness review |
+| Current disposition | Deferred for deliberate review. The operation fails closed and retry guidance remains safe. |
+
+**Observed behavior.**
+
+- In a disposable PostgreSQL 16.14 environment with synthetic data, a separate session held the organization row `FOR UPDATE`.
+- A keyed create for that organization then encountered a foreign-key-related lock wait during its idempotency reservation.
+- After approximately two seconds, it returned `503 idempotency_request_in_flight`.
+- **No competing request held the same idempotency key.**
+- The operation failed closed: it created no case and no idempotency record.
+- After the unrelated organization-row lock was released, the same keyed request succeeded.
+
+**Expected behavior.** ADR-0004 assigns `503` to the case where a **competing request in the same scope** is still unresolved after the bounded wait. A lock wait with any other cause is not that condition. The intended HTTP classification for non-idempotency lock waits is not yet defined; acceptance criterion 2 asks for that definition.
+
+**Root cause (from source review; inferred, not separately executed).**
+
+- `create_case_keyed()` lowers `lock_timeout` to the idempotency wait (default 2000 ms) for the reservation `INSERT INTO case_creation_idempotency ... ON CONFLICT DO NOTHING`.
+- Any `LockNotAvailable` raised while `phase == "reserve"` is classified as an in-flight idempotent request, raised as `IdempotencyRequestInFlight`, and mapped to `503 idempotency_request_in_flight` in [`src/api/errors.py`](../src/api/errors.py). It is also logged as `authz.idempotency_in_flight`.
+- The reservation `INSERT` also checks the record's foreign keys, which lock the referenced organization and actor rows. A source comment at that statement states that these foreign-key locks "do not conflict with ordinary activity". A `FOR UPDATE` lock on the organization row does conflict with them, so a wait on that lock is classified the same way as a wait on a same-scope reservation.
+- The classification therefore uses the statement in which the wait occurred, not the lock that was waited on.
+
+**Reproduction and evidence provenance.**
+
+- **How it was observed.** The scenario was reported from **one** in-process ASGI client test against real PostgreSQL 16.14, with database blocking evidence showing the keyed request waiting behind the session that held the organization row.
+- **What was reviewed separately.** The exception classification described under *Root cause* was independently reviewed in source code. That review is reasoning from code, not an additional execution.
+- **What is not public.** The private validation closeout and the raw scratch output from that run are not published and are not evidence in this repository.
+- **No committed regression test reproduces this scenario.** The existing keyed-creation tests in [`tests/test_keyed_case_creation.py`](../tests/test_keyed_case_creation.py) cover related behavior but **not** an unrelated organization-row lock:
+  - `test_bounded_wait_returns_503_then_retry_resolves` produces the `503` with a competing request that holds the **same** key;
+  - `test_unrelated_key_proceeds_while_a_reservation_is_held` shows that a **different** key is not blocked by a held reservation; no organization-row lock is involved.
+- **Historical report.** The [keyed case creation results](../tests/keyed-case-creation-results.md) predate this finding and are not edited to reflect it.
+
+**Impact.**
+
+- **Correctness and diagnostics.** The response inaccurately attributes a general database lock wait to a concurrent same-scope idempotent request. The error code and the `authz.idempotency_in_flight` log event both name the wrong cause, which can mislead clients and operators.
+- **Limits.** Retry guidance remains safe: nothing was written, and retrying with the same key resolves the request once the lock is released. No duplicate case, partial write, or data exposure was observed.
+
+**Decision and options.** Not established. Options are to be evaluated under acceptance criterion 3, including their locking and deadlock implications.
+
+**Acceptance criteria.**
+
+1. Add a deterministic committed regression test for the unrelated organization-lock scenario.
+2. Define the intended HTTP classification for non-idempotency lock waits.
+3. Evaluate correction options and their locking and deadlock implications.
+4. Preserve atomic creation, authorization before key lookup, and existing replay semantics.
+5. Run the relevant regression suites and record exact results.
+6. Close only after verification, or after an explicit, documented risk-acceptance decision.
 
 **Resolution summary:** Not established.  
 **Verification evidence:** Not established.  
