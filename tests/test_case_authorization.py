@@ -127,9 +127,11 @@ def test_authentication_precedes_input_validation_offline():
 
 def test_entry_points_accept_no_actor_or_scope_parameters_offline():
     sigs = {name: list(inspect.signature(getattr(AuthorizedCaseOperations, name)).parameters)
-            for name in ("create_case", "get_case", "list_cases")}
+            for name in ("create_case", "create_case_keyed", "get_case", "list_cases")}
     assert sigs == {
         "create_case": ["self", "credential", "organization_id", "title", "description"],
+        "create_case_keyed": ["self", "credential", "organization_id", "title", "description",
+                              "idempotency_key"],
         "get_case": ["self", "credential", "case_id"],
         "list_cases": ["self", "credential", "organization_id", "limit"],
     }
@@ -150,12 +152,15 @@ def authz_dsn():
     if conninfo_to_dict(dsn).get("dbname") != "eaiso_test":
         pytest.fail("Safety guard: TEST_DATABASE_URL must refer to eaiso_test")
     with psycopg.connect(dsn) as conn:
-        name, grants = conn.execute(
-            "SELECT current_database(), to_regclass('public.organization_membership')").fetchone()
+        name, grants, keyed = conn.execute(
+            "SELECT current_database(), to_regclass('public.organization_membership'), "
+            "to_regclass('public.case_creation_idempotency')").fetchone()
     if name != "eaiso_test":
         pytest.fail("Safety guard: actual connected database is not eaiso_test")
     if grants is None:
         pytest.fail("Apply db/003_actor_identity_and_grants.sql to eaiso_test first")
+    if keyed is None:
+        pytest.fail("Apply db/004_case_creation_idempotency.sql to eaiso_test first")
     return dsn
 
 
@@ -240,6 +245,8 @@ class World:
         self.admin.close()
         ids = list(self.actors.values())
         with psycopg.connect(self.dsn, autocommit=True) as c:
+            c.execute("DELETE FROM case_creation_idempotency WHERE organization_id = ANY(%s)",
+                      (self.orgs,))
             c.execute("DELETE FROM case_record WHERE organization_id = ANY(%s)", (self.orgs,))
             c.execute("DELETE FROM organization_membership WHERE actor_id = ANY(%s)", (ids,))
             c.execute("DELETE FROM actor WHERE id = ANY(%s)", (ids,))
@@ -425,7 +432,8 @@ def test_unknown_role_cannot_exist_and_unknown_action_has_no_entry_point(world):
         world.admin.execute("UPDATE organization_membership SET role = 'platform_administrator' "
                             "WHERE actor_id = %s", (world.actors["engineer_a"],))
     public = {n for n in dir(AuthorizedCaseOperations) if not n.startswith("_")}
-    assert public == {"create_case", "get_case", "list_cases"}
+    # Keyed creation (ADR-0004) is the same case:create action, not a new permission.
+    assert public == {"create_case", "create_case_keyed", "get_case", "list_cases"}
 
 
 @pytest.mark.db

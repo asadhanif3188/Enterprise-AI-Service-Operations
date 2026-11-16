@@ -9,7 +9,9 @@
 - the structural no-bypass check ([`scripts/check_case_access_boundary.py`](../scripts/check_case_access_boundary.py));
 - the localhost-only HTTP API ([`src/api/`](../src/api/); [section 7.2](#72-implemented-local-http-api)), with HTTP tenant-isolation tests against PostgreSQL and server-generated request IDs.
 
-**Not implemented:** keyed idempotent creation (ADR-0004), cursor pagination, HTTP status transitions, production authentication, and database-enforced tenant isolation.
+- keyed idempotent creation ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md); [results](../tests/keyed-case-creation-results.md)), with authorization before every key lookup.
+
+**Not implemented:** cursor pagination, HTTP status transitions, production authentication, finite idempotency-record retention, and database-enforced tenant isolation.
 
 
 **Scope:** The request-time sequence for `POST /cases`, `GET /cases/{id}`, and `GET /cases`. It describes **how** the [minimum role-permission policy](authorization-permissions.md) is to be enforced, as accepted in ADR-0005. It does not implement anything.  
@@ -37,7 +39,7 @@
 - [ADR-0001](adr/0001-postgresql-authoritative-case-store.md): PostgreSQL is authoritative but provides no tenant authorization by itself.
 - [ADR-0002](adr/0002-ai-suggestions-non-authoritative.md): AI output and case text never confer permissions.
 - [ADR-0003](adr/0003-application-controlled-case-transitions.md): `transition_case()` must not be exposed to untrusted callers.
-- [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): **Accepted** (2026-11-15) as design, **not implemented**. Its key scope is the *authorized* organization plus the *verified* actor.
+- [ADR-0004](adr/0004-keyed-idempotent-case-creation.md): **Accepted** (2026-11-15), **implemented** 2026-11-16 in the authorized case operations and the local HTTP API. Its key scope is the *authorized* organization plus the *verified* actor.
 - [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md): **Accepted** (2026-11-15). Implemented in Python and exposed through the local HTTP API. It records this sequence's identity, enforcement, and revocation decisions.
 
 **Policy summary.** All rows below assume an active actor with an active membership in the organization being evaluated. Any other state is denied.
@@ -187,13 +189,13 @@ The three flows below are implemented: the HTTP steps in [`src/api/`](../src/api
 ### `POST /cases` (`case:create`)
 
 1. Authenticate (`401` on failure).
-2. Validate the body. Reject unexpected fields such as `id`, `actor_id`, `role`, `status`, or `version`; they are **not silently ignored** ([API contract §5](api-contract.md#5-post-cases--create-a-case-implemented-unkeyed-only)). The body's `organization_id` is an **untrusted selector**.
+2. Validate the body. Reject unexpected fields such as `id`, `actor_id`, `role`, `status`, or `version`; they are **not silently ignored** ([API contract §5](api-contract.md#5-post-cases--create-a-case-implemented)). The body's `organization_id` is an **untrusted selector**.
 3. Check that the actor is active (`403` if not).
 4. Look up the membership for `(actor, requested org)`. It must be active, and its role must grant `case:create`. Otherwise return `403` with no case data.
 
    A nonexistent organization has no membership, so it gets the same `403` as a foreign organization. The response does not reveal whether the organization exists.
 5. Create the case using the **authorized** organization from the scope, not the raw body value. It starts at `NEW`, version `1`, with no AI call. Return `201` only after commit.
-6. **Keyed creation, when enabled** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), Accepted design; disabled until ADR-0004 and ADR-0005 are implemented and tested):
+6. **Keyed creation** ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md), implemented): steps 3–4 run first, inside the same locked transaction; the key is then reserved or looked up:
    - Authorize first, before any replay lookup.
    - Scope the key as `(authorized organization_id, verified actor_id, 'case:create', key)`.
    - A replay returns `200` with identity only (`id`, `organization_id`), never the current case state (section 9).
@@ -332,10 +334,10 @@ Both row locks are held until the commit, and the representation is returned onl
 
 **Request processing order.** FastAPI resolves a route's dependencies in declaration order, before the route body:
 
-1. `POST /cases` only: any `Idempotency-Key` header gets `501` (`idempotency_not_implemented`); nothing else is evaluated and nothing is created.
+1. `POST /cases` only: `Idempotency-Key` **syntax**. No field means an unkeyed create. Otherwise exactly one instance whose value is an RFC 9651 String matching `[A-Za-z0-9._~-]{16,128}`, or `400` (`invalid_idempotency_key`). A malformed key never falls back to an unkeyed create.
 2. `Authorization` header **syntax**: exactly one `Bearer <token>` value, else the generic `401`. The token is not verified here.
 3. Request **syntax**: query parameters, then for `POST` the content type, JSON, and body schema (`400`, `415`, `413`, `422`).
-4. The authorized layer: **credential verification** (`401`, `403`, `500`), then **value checks** (canonical UUIDs, text, `limit` range), then authorization and the scoped operation.
+4. The authorized layer: **credential verification** (`401`, `403`, `500`), then **value checks** (canonical UUIDs, text, `limit` range), then authorization and the scoped operation. For a keyed create, the idempotency key is reserved or looked up only after authorization, inside the same locked transaction.
 
 So the Python layer's authentication-first order holds for value checks, but **request-syntax errors are reported before the credential is verified**: a malformed body with a well-formed but invalid credential gets `400`/`415`/`422`, not `401`. Tests demonstrate both directions. Syntax errors reveal nothing about tenants, cases, or credentials.
 
@@ -350,7 +352,11 @@ So the Python layer's authentication-first order holds for value checks, but **r
 | Request syntax (parameters, JSON) / path and query values after authentication | `400` | `invalid_parameter`, `missing_parameter`, `unknown_parameter`, `duplicate_parameter`, `cursor_not_supported`, `malformed_json` |
 | Body schema / body values after authentication | `422` | `invalid_request` |
 | `CaseOperationUnavailable`, `AuthenticationUnavailable`, unexpected errors | `500`, with `request_id` | `internal_error` |
-| `CaseCreationOutcomeUnknown` | `500`, with `request_id`; never `201` | `case_creation_outcome_unknown` |
+| `CaseCreationOutcomeUnknown` | `500`, with `request_id`; never `201` (keyed: retry with the same key; unkeyed: a retry may duplicate) | `case_creation_outcome_unknown` |
+| Malformed, duplicated, or ambiguously named `Idempotency-Key` | `400` | `invalid_idempotency_key` |
+| Keyed replay (same scope, equal fingerprint) | `200`, `Location`, `Idempotency-Replayed: true`, body `id` and `organization_id` only | — |
+| `IdempotencyPayloadMismatch` | `422` | `idempotency_payload_mismatch` |
+| `IdempotencyRequestInFlight` (bounded wait expired) | `503`, with `request_id` | `idempotency_request_in_flight` |
 
 Error bodies contain only fixed, server-written text: no exception messages, SQL, membership details, case text, credentials, or client-supplied values. Unknown routes and methods get `404`/`405` in the same envelope.
 
@@ -402,7 +408,7 @@ The contract's behavior under concurrency is **untested**. Never hold locks acro
 
    The deliberate tradeoff is that two actors who submit one incident are not deduplicated.
 
-**Still pending:** implementation of both ADRs, and executed tests (S08, S09, and the ADR-0004 list). Until then this is an accepted design intention, not a guarantee.
+**Implemented and tested:** both ADRs, including S08 and S09 and the ADR-0004 test list ([results](../tests/keyed-case-creation-results.md)).
 
 ## 10. Future negative test cases
 
@@ -417,8 +423,8 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
 | S05 | Database unavailable during the policy lookup | Generic `500`; no protected operation; not `403` or `404` | Passed (HTTP) |
 | S06 | List cursor issued for A, replayed with `organization_id=B` by an actor in A only | `403` or cursor rejected; no B rows | Interim: no cursor is issued, and any `cursor` parameter is rejected with `400` (HTTP-tested). Cursor scoping itself is not implemented |
 | S07 | Membership or actor revoked concurrently with a write, under the accepted write-locking contract | A revocation that commits first leads to denial. An operation holding locks first completes while the revocation waits. Observed ordering recorded. | Passed (HTTP: revocation-first; both orders at the Python layer) |
-| S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Not implemented (keyed requests get `501`) |
-| S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `422` mismatch about, the first requester's case | Not implemented (keyed requests get `501`) |
+| S08 | Requester replays its own create key after the case changed | `200` replay with only `id` and `organization_id`; no current state disclosed | Passed (HTTP) |
+| S09 | A second requester in the same organization reuses the first requester's key, with the same and with a different payload | Independent operation: a new case for the second requester; no replay of, and no `422` mismatch about, the first requester's case | Passed (HTTP, with two different actors in one organization) |
 | S10 | Logs after a `401`, a `403`, and a `404` | No credential value, no case text, no client header recorded as identity | Passed (HTTP) |
 
 ## 11. Review questions
@@ -436,7 +442,7 @@ These **complement** the policy's vectors V01–V22 ([policy §6](authorization-
    - **Ordering.** An operation that has already taken its locks may finish before a concurrent revocation commits. A revocation that commits first is seen, and the request is denied.
 
    Revocation of in-flight requests is **not** instantaneous. None of this is implemented, and the PostgreSQL locking behavior has **not** been exercised or tested.
-6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. This is accepted as design, but not implemented or tested (section 9).
+6. **What does requester create-only mean?** A later GET returns `404`. A replay re-authorizes and returns identity only. Keys scoped to the actor make another member's key an independent operation. This is implemented and tested (section 9).
 
 ## 12. Resolution in the authorization ADR
 

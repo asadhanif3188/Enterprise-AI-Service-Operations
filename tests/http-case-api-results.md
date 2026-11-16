@@ -5,6 +5,8 @@
 **Governing decisions:** [ADR-0003](../docs/adr/0003-application-controlled-case-transitions.md), [ADR-0004](../docs/adr/0004-keyed-idempotent-case-creation.md), [ADR-0005](../docs/adr/0005-server-verified-identity-and-tenant-authorization.md), [ADR-0006](../docs/adr/0006-actor-affiliation-and-role-grant-eligibility.md); all Accepted and unchanged  
 **Execution date:** 2026-11-15
 
+> **Later change.** The interim `501 idempotency_not_implemented` behavior recorded below was replaced on 2026-11-16 by keyed idempotent creation (ADR-0004): a valid `Idempotency-Key` now gives `201`, `200` replay, `422`, or `503`, and a malformed one gets `400`. See the [keyed case creation results](keyed-case-creation-results.md). The rest of this report describes the API as originally recorded.
+
 **Result.** All three endpoints work through the centralized authorized layer. **95 HTTP tests passed** (72 offline, 23 PostgreSQL-backed), with 0 failed and 0 skipped, on a fresh PostgreSQL 16 environment. HTTP-level tenant isolation is demonstrated against PostgreSQL, with database-state assertions. A real server process was also exercised on `127.0.0.1:8000` (14 of 14 checks passed). The full repository suite passed: **372 tests** in three consecutive runs.
 
 **What this is not.** It is a controlled local demonstration, not a shared or production service:

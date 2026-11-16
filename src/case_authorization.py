@@ -97,6 +97,28 @@ class CaseCreationOutcomeUnknown(CaseAccessError):
         super().__init__("commit_outcome_unknown")
 
 
+class IdempotencyPayloadMismatch(CaseAccessError):
+    """ADR-0004: the caller's own key was already used in this organization with a
+    different request fingerprint. Nothing was created or changed, and nothing
+    about the earlier request is disclosed."""
+
+    status_equivalent = 422
+
+    def __init__(self) -> None:
+        super().__init__("idempotency_payload_mismatch")
+
+
+class IdempotencyRequestInFlight(CaseAccessError):
+    """ADR-0004: a concurrent request with the same scope was still unresolved when
+    the bounded wait expired. This request created nothing; the competing
+    request's outcome is unknown. Retry with the same key."""
+
+    status_equivalent = 503
+
+    def __init__(self) -> None:
+        super().__init__("idempotency_request_in_flight")
+
+
 # ----- Policy -------------------------------------------------------------------
 
 def require_supported_action(action: object) -> str:

@@ -75,6 +75,7 @@ TRUSTED_MODULES = frozenset({
     "src/credential_auth.py",             # credential verification and local store
     "src/identity_provisioning.py",       # trusted local grant provisioning
     "src/model_adapter.py",               # local AI-triage model adapter
+    "src/request_fingerprint.py",         # pure RFC 8785 / ADR-0004 fingerprint (no I/O, no SQL)
 })
 
 # The only names restricted modules may import from trusted modules.
@@ -87,6 +88,7 @@ ROUTE_ALLOWED_SRC_NAMES: dict[str, frozenset[str]] = {
         "CASE_CREATE", "CASE_READ", "CASE_LIST", "CaseAccessError", "InvalidCaseRequest",
         "UnsupportedAction", "OrganizationAccessDenied", "CaseNotFound",
         "CaseOperationUnavailable", "CaseCreationOutcomeUnknown",
+        "IdempotencyPayloadMismatch", "IdempotencyRequestInFlight",
     }),
     "src.credential_auth": frozenset({
         "AuthenticationError", "Unauthenticated", "InactiveActor",
@@ -129,7 +131,7 @@ ROUTE_FORBIDDEN_NAMES = frozenset({"ImportString", "import_string", "attrgetter"
 ALLOWED_DUNDER_ATTRIBUTES = frozenset({"__init__", "__name__", "__qualname__", "__doc__"})
 
 PROTECTED_TABLES = ("case_record", "case_status_event", "ai_suggestion", "organization_membership",
-                    "organization_membership_eligibility_violation")
+                    "organization_membership_eligibility_violation", "case_creation_idempotency")
 # Whole identifiers only, so REST paths such as /case_records are not flagged.
 _TABLE_RE = re.compile(r"\b(" + "|".join(PROTECTED_TABLES) + r")\b", re.IGNORECASE)
 

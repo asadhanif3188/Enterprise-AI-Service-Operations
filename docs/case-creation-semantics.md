@@ -1,8 +1,8 @@
 # Case Creation Semantics
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** This document records current behavior and the accepted future contract. **Idempotent case creation is not implemented.** The contract below is an accepted architecture decision for a future create-case API, not a current guarantee. No database-backed duplicate-creation or idempotency test has been executed.  
-**Decision record:** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (**Accepted** 2026-11-15 as architecture; not implemented) records this decision, the alternatives considered, and the tradeoffs. Identity and authorization are accepted in [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; not implemented). This document remains the detailed design reference for current behavior, contract rules, expected outcomes, open decisions, and required validation.
+**Status:** **Keyed idempotent case creation is implemented** for the local demonstration, as accepted in ADR-0004: migration [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql), `create_case_keyed` in the [authorized case operations](../src/authorized_case_operations.py), and `POST /cases` with an `Idempotency-Key` header in the [local HTTP API](../src/api/). Observed results: [keyed case creation results](../tests/keyed-case-creation-results.md). Requests **without** a key still create distinct cases, and the local [`create_case()`](../src/case_service.py) service remains non-idempotent.  
+**Decision record:** [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (**Accepted** 2026-11-15; implemented 2026-11-16) records this decision, the alternatives considered, and the tradeoffs. Identity and authorization come from [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; implemented in the Python authorization layer and the local HTTP API). This document remains the detailed design reference for behavior, contract rules, expected outcomes, and validation.
 
 ## 1. The problem
 
@@ -14,7 +14,9 @@ Case content cannot identify a duplicate request, however. Two genuinely separat
 
 ## 2. Current behavior
 
-### 2.1 `create_case()`
+### 2.1 `create_case()` (local case service)
+
+> The HTTP API does not use this function. Its create path is the authorized case operations, which offer unkeyed creation (distinct cases) and keyed creation (section 3).
 
 [`create_case()`](../src/case_service.py) in the local case service:
 
@@ -55,9 +57,9 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 
 **Decision status:** **Accepted** as architecture in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) on 2026-11-15.
 
-- **Not implemented.** `create_case()` remains non-idempotent, and no test exists.
-- **Dependency.** The rules depend on [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md) (Accepted; not implemented) for verified identity and authorization.
-- **Disabled until ready.** Keyed creation stays disabled until both ADRs are implemented and the tests in section 5 have passed.
+- **Implemented.** Keyed creation is enabled in the local HTTP API. The tests in section 5 were executed against PostgreSQL ([results](../tests/keyed-case-creation-results.md)).
+- **Dependency.** Verified identity and authorization come from [ADR-0005](adr/0005-server-verified-identity-and-tenant-authorization.md), implemented in the authorized case operations; authorization runs before every key lookup.
+- **Unchanged.** Requests without a key, and the local `create_case()` service, keep distinct-creation semantics.
 
 | # | Rule |
 |---|---|
@@ -75,7 +77,7 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 
 ### Expected outcomes
 
-| Scenario | Outcome under the accepted design (not implemented) |
+| Scenario | Outcome (implemented; HTTP-tested against PostgreSQL) |
 |---|---|
 | Two requests without a key, identical content | Two distinct cases |
 | Two requests with different keys, identical content | Two distinct cases |
@@ -91,12 +93,25 @@ Neither submits the same creation request twice. **No database-backed duplicate-
 | Body with duplicate property names or unknown properties | Rejected; no fingerprint computed; no case created |
 | First attempt rolled back before commit, then retried with the same key | No record was committed, so the retry creates the case once |
 
-### Illustrative transaction
+### Implemented transaction
 
-This sketch is a **design aid only**. It is not a migration, it has not been executed, and no `case_creation_idempotency` table exists.
+The implementation ([`create_case_keyed`](../src/authorized_case_operations.py)) **reserves the key before inserting the case**, which differs from the original sketch kept below:
+
+1. Authorize (ADR-0005): lock the actor, then the membership, `FOR SHARE`; require `case:create`. No key is read before this.
+2. Reserve: `INSERT INTO case_creation_idempotency (..., case_id) VALUES (..., <new UUID>) ON CONFLICT (organization_id, actor_id, operation, idempotency_key) DO NOTHING RETURNING case_id`, with `lock_timeout` set to the bounded wait for this statement only.
+   - If another transaction holds an uncommitted record for the same scope, the statement waits for it.
+   - When that transaction commits, no row is returned.
+   - When it rolls back, the reservation succeeds.
+   - When the wait expires, `LockNotAvailable` becomes `503` and nothing was written.
+3. Won the reservation: insert the case with that UUID and commit. The record's composite foreign key to `case_record (organization_id, id)` is `DEFERRABLE INITIALLY DEFERRED`, so it is checked at commit: the case and its record commit together or not at all.
+4. Lost the reservation: read the committed record in the same scope, roll back, and return the replay (equal fingerprint version and digest) or `422` (anything else).
+
+Because a losing request never inserts a case, there is no speculative case to discard and no savepoint is needed. A rollback, a terminated backend, or a failure before `COMMIT` removes the reservation with everything else, so a retry can create the case once.
+
+**Original design sketch** (not what was implemented; kept for the record):
 
 ```sql
--- Table shape for the accepted design (not created):
+-- Table shape for the accepted design (implemented, with additions, in db/004):
 --   case_creation_idempotency(organization_id, actor_id, operation, idempotency_key,
 --                             fingerprint_version, request_fingerprint,
 --                             case_id NOT NULL REFERENCES case_record, created_at)
@@ -128,9 +143,9 @@ Under READ COMMITTED, the second `INSERT` waits if a concurrent transaction hold
 
 The wait is bounded and configurable, for example through a lock or statement timeout; its value is set during implementation, from measurement. If the bound expires, the transaction rolls back and the response is a generic `503`. The case insert commits only when its record does, so a losing attempt leaves no case behind.
 
-### How canonicalization will be implemented and tested later
+### How canonicalization is implemented and tested
 
-Nothing below exists today. The current application does not parse `Idempotency-Key` and does not compute fingerprints.
+Implemented as below; conformance results are in the [keyed case creation results](../tests/keyed-case-creation-results.md).
 
 - **Parsing:** a JSON parser configured to fail on duplicate property names; Python's default `json.loads` keeps the last duplicate silently, so it needs an `object_pairs_hook` or an equivalent strict parser. The parser must also reject invalid Unicode such as lone surrogates.
 - **Body validation:** reject unknown properties.
@@ -146,9 +161,21 @@ Nothing below exists today. The current application does not parse `Idempotency-
 
 The architecture is settled by ADR-0004. These choices are left to implementation or measurement and need no new ADR:
 
-- **Bounded wait.** The mechanism and its value, from measurement, and whether `503` carries `Retry-After`.
-- **Libraries.** The RFC 9651 parser and the RFC 8785 serializer, or a minimal verified serializer.
-- **Storage details.** Column types and indexes for the idempotency record.
+Each was settled during implementation:
+
+- **Bounded wait.** A `lock_timeout` on the reservation statement only, default **2000 ms**, configurable with `EAISO_IDEMPOTENCY_WAIT_MS` (1–9000 ms).
+  - **Why 2000 ms:** measured keyed creates took 121 ms at p99 end to end (median 71 ms), so the bound is about 16 times p99 and below the 5 s lock and 10 s statement timeouts.
+  - **`Retry-After`:** `503` carries none.
+- **Libraries.** No new third-party dependency:
+  - a minimal RFC 9651 Item parser ([`src/api/structured_fields.py`](../src/api/structured_fields.py));
+  - a minimal RFC 8785 serializer ([`src/request_fingerprint.py`](../src/request_fingerprint.py)).
+
+  Both are verified against the RFC examples.
+- **Storage details.** [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql):
+  - the scope is the primary key;
+  - `CHECK` constraints cover the operation vocabulary, key shape, fingerprint version, and lowercase SHA-256 hex;
+  - `case_id` is `NOT NULL` and unique;
+  - a deferred composite foreign key to `case_record (organization_id, id)` is backed by a new unique constraint on that pair.
 
 These require a separate decision before they change:
 
@@ -175,13 +202,13 @@ A separate validation increment must test the implementation against a dedicated
 13. **Header parsing.** Quoted valid keys are accepted. Unquoted, token, and integer items, bad escapes, and keys outside the pattern get `400`. Keys are case-sensitive. Parameters are ignored.
 14. **Canonicalization.** The equivalence and rejection cases listed in section 3.
 
-The same list appears in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md#revisit-when). These tests are required before keyed creation is **enabled**. They were not prerequisites for accepting the ADR as a design.
+The same list appears in [ADR-0004](adr/0004-keyed-idempotent-case-creation.md#revisit-when). All of them were executed against PostgreSQL before keyed creation was enabled; observed results, including real fault injection and negative controls, are in the [keyed case creation results](../tests/keyed-case-creation-results.md).
 
-None of these tests exists yet. Until observed results are recorded, no document should claim that case creation is idempotent or duplicate-safe.
+Keyed creation is duplicate-safe only for retries that reuse the same key, actor, organization, and payload. It does not provide exactly-once network delivery, and requests without a key remain non-idempotent.
 
 ## 6. Related documents
 
-- [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md): the accepted decision (not implemented) and its tradeoffs.
+- [ADR-0004: Keyed Idempotent Case Creation](adr/0004-keyed-idempotent-case-creation.md): the accepted decision and its tradeoffs; [implementation results](../tests/keyed-case-creation-results.md).
 - [System context](system-context.md): current components, capability status, and trust boundaries.
 - [Controlled case operations](case-operations.md): the local case service and its limits.
 - [Data model](data-model.md): `case_record` attributes and integrity rules.

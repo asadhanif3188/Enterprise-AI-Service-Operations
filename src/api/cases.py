@@ -8,8 +8,10 @@ security policy of its own: it parses HTTP and maps typed outcomes.
 Request processing order (FastAPI resolves a route's dependencies in the order
 they are declared, before the route body runs):
 
-1. ``POST`` only: any ``Idempotency-Key`` header is rejected (``501``), because
-   keyed creation (ADR-0004) is not implemented. Nothing else is evaluated.
+1. ``POST`` only: ``Idempotency-Key`` syntax (ADR-0004). Absent: an ordinary
+   unkeyed create. Present: exactly one field instance whose value is an RFC
+   9651 String matching ``[A-Za-z0-9._~-]{16,128}``, else ``400``. A malformed
+   key never falls back to an unkeyed create. The value is never logged.
 2. ``Authorization`` header syntax: exactly one ``Bearer <token>`` value, else
    the generic ``401``. The token is not verified here.
 3. Request syntax: query parameters, then (``POST``) content type, JSON, and
@@ -18,7 +20,8 @@ they are declared, before the route body runs):
    malformed body gets ``400``/``415``/``422``, not ``401``.
 4. The authorized layer: credential verification (``401``/``403``/``500``),
    then value checks such as the canonical UUID form and blank text, then
-   authorization and the scoped operation.
+   authorization and the scoped operation. For a keyed create, authorization
+   always precedes any idempotency-key lookup (ADR-0004).
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from src.api.errors import ApiError, invalid_request
@@ -37,6 +41,7 @@ from src.api.schemas import (
     CaseListResponse,
     CaseResponse,
 )
+from src.api.structured_fields import StructuredFieldError, parse_string_item
 from src.authorized_case_operations import DEFAULT_LIST_LIMIT
 from src.case_authorization import InvalidCaseRequest
 from src.credential_auth import Unauthenticated
@@ -50,18 +55,36 @@ _JSON_MEDIA_TYPE = re.compile(r"application/json(\s*;\s*charset=(utf-8|\"utf-8\"
 _LIMIT_SYNTAX = re.compile(r"[0-9]{1,4}")
 MAX_BODY_BYTES = 64 * 1024
 LIST_PARAMETERS = ("organization_id", "limit")
+IDEMPOTENCY_HEADER = "idempotency-key"
+# Syntax check only; the authorized layer validates the key again.
+_IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9._~-]{16,128}")
 
 
 # ----- dependencies (run in declaration order) ------------------------------------
 
-def reject_idempotency_key(request: Request) -> None:
-    # The header's value is never read, parsed, logged, or echoed. Names are
-    # compared case-insensitively and with "_" read as "-", so a proxy that
-    # rewrites underscores cannot turn a rejected keyed request into a create.
-    if any(name.lower().replace("_", "-") == "idempotency-key" for name in request.headers):
-        raise ApiError(501, "idempotency_not_implemented",
-                       "Keyed case creation (Idempotency-Key) is not implemented; "
-                       "no case was created")
+def idempotency_key(request: Request) -> str | None:
+    """Return the decoded key, ``None`` when no key was sent, or raise ``400``.
+
+    Header names are compared case-insensitively and with ``_`` read as ``-``,
+    so a spelling that a proxy might normalize differently is never ignored:
+    it is rejected as ambiguous, like duplicate field instances.
+    """
+    instances = [(name, value) for name, value in request.headers.raw
+                 if name.decode("latin-1").lower().replace("_", "-") == IDEMPOTENCY_HEADER]
+    if not instances:
+        return None
+    key: str | None = None
+    if len(instances) == 1 and instances[0][0].decode("latin-1").lower() == IDEMPOTENCY_HEADER:
+        try:
+            key = parse_string_item(instances[0][1].decode("ascii"))
+        except (UnicodeDecodeError, StructuredFieldError):
+            key = None
+    if key is None or _IDEMPOTENCY_KEY.fullmatch(key) is None:
+        # Raised outside the except block; the value is never echoed or logged.
+        raise ApiError(400, "invalid_idempotency_key",
+                       "Idempotency-Key must be one RFC 9651 String of 16 to 128 characters "
+                       "from A-Z, a-z, 0-9, '.', '_', '~', and '-'")
+    return key
 
 
 def bearer_credential(request: Request) -> str:
@@ -151,7 +174,7 @@ def case_operations(request: Request):
 
 
 # Parameter types: FastAPI resolves these dependencies in parameter order.
-IdempotencyGuard = Annotated[None, Depends(reject_idempotency_key)]
+IdempotencyKey = Annotated[str | None, Depends(idempotency_key)]
 BearerCredential = Annotated[str, Depends(bearer_credential)]
 NoQueryParameters = Annotated[None, Depends(no_query_parameters)]
 CreateBody = Annotated[CaseCreateRequest, Depends(case_create_body)]
@@ -165,22 +188,41 @@ Operations = Annotated[Any, Depends(case_operations)]
 @router.post("/cases", status_code=201, response_model=CaseResponse)
 def create_case(
     response: Response,
-    _key: IdempotencyGuard,
+    key: IdempotencyKey,
     credential: BearerCredential,
     _query: NoQueryParameters,
     body: CreateBody,
     operations: Operations,
-) -> dict:
-    """Unkeyed create: separate successful requests create separate cases."""
+) -> Any:
+    """Create a case. Without a key, separate successful requests create separate
+    cases. With a key (ADR-0004): ``201`` for a new case, ``200`` identity-only
+    replay, ``422`` payload mismatch, or ``503`` if a concurrent request with the
+    same scope stays unresolved.
+    """
     rejected: InvalidCaseRequest | None = None
     try:
-        created = operations.create_case(credential, body.organization_id, body.title,
-                                         body.description)
+        if key is None:
+            created = operations.create_case(credential, body.organization_id, body.title,
+                                             body.description)
+            replayed = False
+        else:
+            outcome = operations.create_case_keyed(credential, body.organization_id, body.title,
+                                                   body.description, key)
+            created, replayed = outcome.representation, outcome.replayed
     except InvalidCaseRequest as exc:
         rejected = exc
     if rejected is not None:
-        raise invalid_request(rejected, status=422)
-    response.headers["Location"] = f"/cases/{created['id']}"
+        raise invalid_request(rejected, status=400 if rejected.reason == "idempotency_key_malformed"
+                              else 422)
+    location = f"/cases/{created['id']}"
+    if replayed:
+        # Identity only, from the idempotency record. Returned as a response
+        # object so the full CaseResponse model neither expands nor rejects it.
+        return JSONResponse({"id": str(created["id"]),
+                             "organization_id": str(created["organization_id"])},
+                            status_code=200,
+                            headers={"Location": location, "Idempotency-Replayed": "true"})
+    response.headers["Location"] = location
     return created
 
 

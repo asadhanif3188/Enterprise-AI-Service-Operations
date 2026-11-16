@@ -1,7 +1,7 @@
 # Initial Relational Data Model
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)); AI suggestion output contract enforced by the application; case status-transition history added and exercised through a local case service ([16/16 tests passed](../tests/case-operations-results.md)); actor identity and customer access grants added with database eligibility guards ([87/87 identity tests passed](../tests/identity-grant-integrity-results.md)), not yet used for authorization.
+**Status:** Draft v0.1 — initial PostgreSQL schema implemented; relational integrity validated ([11/11 checks passed](../tests/schema-integrity-results.md)); AI suggestion output contract enforced by the application; case status-transition history added and exercised through a local case service ([16/16 tests passed](../tests/case-operations-results.md)); actor identity and customer access grants added with database eligibility guards ([identity tests](../tests/identity-grant-integrity-results.md)) and used for request-time authorization by the authorized case operations and the local HTTP API; keyed idempotent case creation added ([`db/004`](../db/004_case_creation_idempotency.sql), [results](../tests/keyed-case-creation-results.md)).
 
 ## 1. Purpose and scope
 
@@ -144,6 +144,26 @@ The [local case service](case-operations.md) inserts one event in the same trans
 
 `actor_label` is a diagnostic value such as `local-synthetic-operator`. It is not proof of who acted or that they were permitted to act.
 
+### `case_creation_idempotency`
+
+Added by [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql) for keyed case creation ([ADR-0004](adr/0004-keyed-idempotent-case-creation.md)).
+
+| Attribute | Type | Rule or purpose |
+|---|---|---|
+| `organization_id` | `uuid` | Required foreign key to `organization.id`; the **authorized** organization. |
+| `actor_id` | `uuid` | Required foreign key to `actor.id`; the **verified** actor. |
+| `operation` | `text` | Required; only `case:create`. |
+| `idempotency_key` | `text` | Required; the decoded key, case-sensitive, matching `^[A-Za-z0-9._~-]{16,128}$`. |
+| `fingerprint_version` | `smallint` | Required; only `1`. |
+| `request_fingerprint` | `text` | Required; 64 lowercase hexadecimal characters (SHA-256 of the RFC 8785 canonical request). The payload itself is not stored. |
+| `case_id` | `uuid` | Required and unique; the case this keyed request created. |
+| `created_at` | `timestamptz` | Required; defaults to now. |
+
+- **Scope:** the primary key is `(organization_id, actor_id, operation, idempotency_key)`, and it arbitrates concurrent requests.
+- **Ownership:** a composite foreign key `(organization_id, case_id)` → `case_record (organization_id, id)`, backed by a new unique constraint on that `case_record` pair, prevents a record from naming another customer's case. It is deferred to commit, so the key can be reserved before the case is inserted in the same transaction.
+- **No content uniqueness:** there is still no uniqueness on case title or description.
+- **Lifetime:** records never expire in the local demonstration, and a case with a record cannot be deleted.
+
 ## 4. Case lifecycle
 
 The initial lifecycle contains four states:
@@ -181,7 +201,7 @@ The database does **not** check that an event's statuses form an allowed transit
 
 Other guarantees need more than a foreign key or `CHECK` constraint:
 
-- **Tenant authorization:** The application must verify the caller's permitted organization(s) on every protected access path. A valid `organization_id` is not proof of permission. The case service filters reads and transitions by a caller-supplied organization ID, which is query scoping, not authorization. Database row-level security may provide another enforcement layer, but it is not implemented by this model alone.
+- **Tenant authorization:** The application must verify the caller's permitted organization(s) on every protected access path. A valid `organization_id` is not proof of permission. The authorized case operations (and the local HTTP API that calls them) verify the actor and an active membership before every create, read, and list. The local case service still filters by a caller-supplied organization ID, which is query scoping, not authorization. Database row-level security is not implemented, so isolation is enforced by the application only.
 - **Valid state transitions:** The case service checks the current state against the initial forward-only policy. It does not yet check the actor's permission.
 - **Concurrent updates:** The case service locks the case row, compares the caller's expected `version`, and increments it atomically with the status change; an outdated request fails rather than overwriting newer state. The schema does not increment `version` automatically, so writers that bypass the service are not covered.
 - **Suggestion freshness:** If a suggestion was generated from case version `3` but the current case is version `4`, it must not be approved for execution without reassessment. Recording `case_version` allows that check but does not perform it automatically. The triage CLI rechecks the case version before storing a new suggestion.
@@ -202,14 +222,14 @@ Other guarantees need more than a foreign key or `CHECK` constraint:
 
 ## 7. Deferred decisions
 
-- How verified identities are used. `actor` (with provider/customer affiliation) and `organization_membership` (customer access grants) now exist in [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), with the role-grant eligibility guards accepted in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) and described in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants). Still deferred: credential resolution, request-time authorization (ADR-0005), engineer assignment to cases, and linking `case_status_event` to a verified actor.
+- How verified identities are used. `actor` (with provider/customer affiliation) and `organization_membership` (customer access grants) now exist in [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql), with the role-grant eligibility guards accepted in [ADR-0006](adr/0006-actor-affiliation-and-role-grant-eligibility.md) and described in the [identity model](identity-model.md#10-provider-affiliation-vs-customer-access-grants). Credential resolution and request-time authorization (ADR-0005) are implemented in the authorized case operations. Still deferred: engineer assignment to cases, and linking cases and `case_status_event` to a verified actor.
 - Full transition rules, including reopening and who may resolve or close cases.
 - Approval records and a complete case history covering creation, content edits, and review decisions; both are required before claiming a complete reviewed workflow. The current status-transition events are only part of that history.
 - Final category and urgency vocabularies, and whether to enforce them in the database as well as in the application output contract.
 - Whether `description` may be absent for imported or partial cases.
 - Data retention, deletion, and organization offboarding rules.
-- How idempotent case creation is stored. The accepted design is an idempotency record scoped to the authorized organization, the verified actor, and the operation, holding a versioned request fingerprint and committed atomically with the new case. No migration exists yet. No title or description uniqueness constraint will be added. See [ADR-0004](adr/0004-keyed-idempotent-case-creation.md) (Accepted; not implemented) and [Case creation semantics](case-creation-semantics.md).
+- Retention for idempotency records. Keyed creation is implemented (`case_creation_idempotency`, above); records never expire in the local demonstration, and a finite retention policy, cleanup, and post-expiry semantics are required before any other use.
 - Whether model execution evidence moves from evaluation files into a database record, and how case revisions are captured.
 - Query patterns, indexes beyond keys, tenant-access enforcement, and performance targets; these will be justified by implemented reads and measurements.
 
-**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql) adds `actor` and `organization_membership`, which are documented in the [identity model](identity-model.md) rather than here, with observed results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). An initial local [AI triage integration](ai-triage-integration.md) writes application-validated suggestions to `ai_suggestion`. [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) adds `case_status_event`, and a local [case service](case-operations.md) applies forward-only, version-checked transitions with transactional event recording ([16/16 tests passed](../tests/case-operations-results.md)). The schema provides structural constraints and referential integrity. Transition rules and version checks are enforced by the case service, not the database, and tenant authorization is **not** yet established.
+**Implementation status:** The initial schema is implemented in [`db/001_init.sql`](../db/001_init.sql), with synthetic development data in [`db/seed_dev.sql`](../db/seed_dev.sql). [`db/003_actor_identity_and_grants.sql`](../db/003_actor_identity_and_grants.sql) adds `actor` and `organization_membership`, which are documented in the [identity model](identity-model.md) rather than here, with observed results in the [identity and role-grant integrity results](../tests/identity-grant-integrity-results.md). Its relational integrity has been validated: see the [schema integrity validation report](../tests/schema-integrity-results.md) (11/11 checks passed). An initial local [AI triage integration](ai-triage-integration.md) writes application-validated suggestions to `ai_suggestion`. [`db/002_case_status_events.sql`](../db/002_case_status_events.sql) adds `case_status_event`, and a local [case service](case-operations.md) applies forward-only, version-checked transitions with transactional event recording ([16/16 tests passed](../tests/case-operations-results.md)). The schema provides structural constraints and referential integrity. Transition rules and version checks are enforced by the case service, not the database, and tenant authorization is enforced by the application layer (the authorized case operations), not by the database. [`db/004_case_creation_idempotency.sql`](../db/004_case_creation_idempotency.sql) adds `case_creation_idempotency` for keyed case creation ([results](../tests/keyed-case-creation-results.md)).

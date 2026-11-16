@@ -30,15 +30,18 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from src import case_authorization as policy
 from src.case_authorization import (
     CaseCreationOutcomeUnknown,
     CaseNotFound,
     CaseOperationUnavailable,
+    IdempotencyPayloadMismatch,
+    IdempotencyRequestInFlight,
     InvalidCaseRequest,
     OrganizationAccessDenied,
 )
@@ -48,6 +51,7 @@ from src.credential_auth import (
     VerifiedActor,
     resolver_from_environment,
 )
+from src.request_fingerprint import FINGERPRINT_VERSION, case_create_fingerprint
 
 logger = logging.getLogger("eaiso.authz")
 
@@ -60,6 +64,11 @@ _UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 CASE_FIELDS = ("id", "organization_id", "title", "description", "status", "version",
                "created_at", "updated_at")
 LIST_FIELDS = ("id", "organization_id", "title", "status", "version", "created_at")
+REPLAY_FIELDS = ("id", "organization_id")
+
+# ADR-0004: the decoded Idempotency-Key value (case-sensitive).
+_IDEMPOTENCY_KEY_RE = re.compile(r"[A-Za-z0-9._~-]{16,128}")
+DEFAULT_IDEMPOTENCY_WAIT_MS = 2000
 
 
 class Resolver(Protocol):
@@ -96,6 +105,25 @@ def _text(value: object, name: str) -> str:
     return value
 
 
+def _idempotency_key(value: object) -> str:
+    if type(value) is not str or _IDEMPOTENCY_KEY_RE.fullmatch(value) is None:
+        raise InvalidCaseRequest("idempotency_key_malformed")
+    return value
+
+
+@dataclass(frozen=True)
+class KeyedCaseCreation:
+    """Outcome of a keyed create: a new case, or a replay of the caller's own earlier one.
+
+    ``representation`` is the full creation representation for a new case, and
+    only ``id`` and ``organization_id`` (read from the idempotency record, never
+    from the case) for a replay.
+    """
+
+    replayed: bool
+    representation: dict
+
+
 def _limit(value: object) -> int:
     if type(value) is not int or not 1 <= value <= MAX_LIST_LIMIT:
         raise InvalidCaseRequest("limit_out_of_range")
@@ -116,12 +144,16 @@ class AuthorizedCaseOperations:
     """Protected case create, read, and list for a verified caller."""
 
     def __init__(self, resolver: Resolver, dsn: str, *, connect_timeout_s: int = 5,
-                 lock_timeout_ms: int = 5000, statement_timeout_ms: int = 10000):
+                 lock_timeout_ms: int = 5000, statement_timeout_ms: int = 10000,
+                 idempotency_wait_ms: int = DEFAULT_IDEMPOTENCY_WAIT_MS):
+        if not 1 <= int(idempotency_wait_ms) < int(statement_timeout_ms):
+            raise ValueError("idempotency_wait_ms must be positive and below the statement timeout")
         self._resolver = resolver
         self._dsn = dsn
         self._connect_timeout_s = connect_timeout_s
         self._lock_timeout_ms = lock_timeout_ms
         self._statement_timeout_ms = statement_timeout_ms
+        self._idempotency_wait_ms = int(idempotency_wait_ms)
 
     # ----- infrastructure ----------------------------------------------------------
 
@@ -150,6 +182,34 @@ class AuthorizedCaseOperations:
                     action, actor_id, getattr(error, "reason", type(error).__name__))
         return error
 
+    @staticmethod
+    def _authorize_create(conn, actor_id: UUID, org_id: UUID) -> tuple[Exception | None, dict | None]:
+        """ADR-0005 write authorization inside the caller's transaction.
+
+        Statement 1 locks the actor row FOR SHARE. Under READ COMMITTED a
+        concurrent, uncommitted deactivation makes it wait; afterwards the latest
+        committed row version is returned. Statement 2 then locks the membership
+        row FOR SHARE, separately, so the lock order is always actor, then
+        membership. Both locks are held until the transaction ends. Returns
+        ``(denial, None)`` or ``(None, grant)``.
+        """
+        actor = conn.execute(
+            "SELECT is_active FROM actor WHERE id = %s FOR SHARE", (actor_id,)
+        ).fetchone()
+        if actor is None:
+            return Unauthenticated("actor_not_found"), None
+        if actor["is_active"] is not True:
+            return InactiveActor(), None
+        grant = conn.execute(
+            """SELECT organization_id, role, is_active FROM organization_membership
+               WHERE actor_id = %s AND organization_id = %s FOR SHARE""",
+            (actor_id, org_id),
+        ).fetchone()
+        if (grant is None or grant["is_active"] is not True
+                or not policy.permits(grant["role"], policy.CASE_CREATE)):
+            return OrganizationAccessDenied(), None
+        return None, grant
+
     # ----- create -------------------------------------------------------------------
 
     def create_case(self, credential: object, organization_id: object,
@@ -173,36 +233,17 @@ class AuthorizedCaseOperations:
         try:
             with self._connect(autocommit=False) as conn:
                 phase = "authorize"
-                # Statement 1: lock the actor row FOR SHARE. Under READ COMMITTED a
-                # concurrent, uncommitted deactivation makes this wait; afterwards
-                # the latest committed row version is returned.
-                actor = conn.execute(
-                    "SELECT is_active FROM actor WHERE id = %s FOR SHARE", (actor_id,)
-                ).fetchone()
-                if actor is None:
-                    denial = Unauthenticated("actor_not_found")
-                elif actor["is_active"] is not True:
-                    denial = InactiveActor()
-                else:
-                    # Statement 2: lock the membership row FOR SHARE, separately,
-                    # so the lock order is always actor, then membership.
-                    grant = conn.execute(
-                        """SELECT organization_id, role, is_active FROM organization_membership
-                           WHERE actor_id = %s AND organization_id = %s FOR SHARE""",
-                        (actor_id, org_id),
+                denial, grant = self._authorize_create(conn, actor_id, org_id)
+                if denial is None:
+                    assert grant is not None
+                    phase = "write"
+                    created = conn.execute(
+                        """INSERT INTO case_record (organization_id, title, description)
+                           VALUES (%s, %s, %s)
+                           RETURNING id, organization_id, title, description,
+                                     status, version, created_at, updated_at""",
+                        (grant["organization_id"], title_text, description_text),
                     ).fetchone()
-                    if (grant is None or grant["is_active"] is not True
-                            or not policy.permits(grant["role"], policy.CASE_CREATE)):
-                        denial = OrganizationAccessDenied()
-                    else:
-                        phase = "write"
-                        created = conn.execute(
-                            """INSERT INTO case_record (organization_id, title, description)
-                               VALUES (%s, %s, %s)
-                               RETURNING id, organization_id, title, description,
-                                         status, version, created_at, updated_at""",
-                            (grant["organization_id"], title_text, description_text),
-                        ).fetchone()
                 if denial is not None:
                     conn.rollback()
                 else:
@@ -227,6 +268,139 @@ class AuthorizedCaseOperations:
         logger.info("authz.allowed action=%s actor_id=%s organization_id=%s case_id=%s",
                     policy.CASE_CREATE, actor_id, created["organization_id"], created["id"])
         return {field: created[field] for field in CASE_FIELDS}
+
+    def create_case_keyed(self, credential: object, organization_id: object, title: object,
+                          description: object, idempotency_key: object) -> KeyedCaseCreation:
+        """Keyed, idempotent create (ADR-0004), scoped to the authorized organization
+        and the verified actor.
+
+        Algorithm, in one short READ COMMITTED transaction:
+
+        1. Authorize exactly as for an unkeyed create (actor, then membership,
+           ``FOR SHARE``; ``case:create``). Nothing about keys is read before this.
+        2. **Reserve** the scope: insert the idempotency record first, with a
+           freshly generated case ID, ``ON CONFLICT DO NOTHING``. The primary key
+           arbitrates. If a concurrent transaction holds an uncommitted record for
+           the same scope, this statement waits for it, bounded by
+           ``idempotency_wait_ms``; on expiry nothing was written and the result
+           is ``IdempotencyRequestInFlight`` (``503``).
+        3. If the reservation won, insert the case with that ID and commit. The
+           record's composite foreign key to ``(organization_id, case_id)`` is
+           checked at commit, so both rows commit together or not at all.
+        4. If it lost (a committed record exists), read that record in the same
+           scope and roll back. No speculative case was ever inserted, so a
+           losing attempt cannot leave one behind. An equal fingerprint is a
+           replay (``id`` and ``organization_id`` from the record only); any
+           other fingerprint is ``IdempotencyPayloadMismatch``.
+
+        A failure during COMMIT is ``CaseCreationOutcomeUnknown``; retrying with
+        the same key then resolves it (a replay if the case committed, a create
+        if it did not).
+        """
+        actor_id = self._verify(credential)
+        org_id = _uuid(organization_id, "organization_id")
+        title_text = _text(title, "title")
+        description_text = _text(description, "description")
+        key = _idempotency_key(idempotency_key)
+        fingerprint = case_create_fingerprint(org_id, title_text, description_text)
+
+        import psycopg
+
+        phase = "connect"
+        failure: tuple[str, str] | None = None
+        in_flight = False
+        denial: Exception | None = None
+        created: dict | None = None
+        existing: dict | None = None
+        try:
+            with self._connect(autocommit=False) as conn:
+                phase = "authorize"
+                denial, grant = self._authorize_create(conn, actor_id, org_id)
+                if denial is None:
+                    assert grant is not None
+                    authorized_org = grant["organization_id"]
+                    new_case_id = uuid4()
+                    conn.execute("SELECT set_config('lock_timeout', %s, true)",
+                                 (f"{self._idempotency_wait_ms}ms",))
+                    # Only this statement's lock waits map to 503 (it also takes
+                    # the foreign-key locks on the organization and actor rows,
+                    # which do not conflict with ordinary activity).
+                    phase = "reserve"
+                    reserved = conn.execute(
+                        """INSERT INTO case_creation_idempotency
+                               (organization_id, actor_id, operation, idempotency_key,
+                                fingerprint_version, request_fingerprint, case_id)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (organization_id, actor_id, operation, idempotency_key)
+                           DO NOTHING
+                           RETURNING case_id""",
+                        (authorized_org, actor_id, policy.CASE_CREATE, key,
+                         FINGERPRINT_VERSION, fingerprint, new_case_id),
+                    ).fetchone()
+                    phase = "reserved"
+                    conn.execute("SELECT set_config('lock_timeout', %s, true)",
+                                 (f"{int(self._lock_timeout_ms)}ms",))
+                    if reserved is None:
+                        phase = "lookup"
+                        existing = conn.execute(
+                            """SELECT organization_id, case_id, fingerprint_version,
+                                      request_fingerprint
+                                 FROM case_creation_idempotency
+                                WHERE organization_id = %s AND actor_id = %s
+                                  AND operation = %s AND idempotency_key = %s""",
+                            (authorized_org, actor_id, policy.CASE_CREATE, key),
+                        ).fetchone()
+                        if existing is None:
+                            raise RuntimeError("conflicting record not visible")
+                    else:
+                        phase = "write"
+                        created = conn.execute(
+                            """INSERT INTO case_record (id, organization_id, title, description)
+                               VALUES (%s, %s, %s, %s)
+                               RETURNING id, organization_id, title, description,
+                                         status, version, created_at, updated_at""",
+                            (new_case_id, authorized_org, title_text, description_text),
+                        ).fetchone()
+                if denial is not None or existing is not None:
+                    conn.rollback()
+                else:
+                    phase = "commit"
+                    conn.commit()  # case and record together; both row locks held until here
+        except psycopg.Error as exc:
+            failure = (phase, _reason(exc))
+            in_flight = phase == "reserve" and isinstance(exc, psycopg.errors.LockNotAvailable)
+        except Exception:  # noqa: BLE001 - any other error still fails closed
+            failure = (phase, "internal")
+
+        if failure is not None:
+            phase, reason = failure
+            if in_flight:
+                logger.warning("authz.idempotency_in_flight action=%s actor_id=%s",
+                               policy.CASE_CREATE, actor_id)
+                raise IdempotencyRequestInFlight()
+            logger.error("authz.unavailable action=%s actor_id=%s phase=%s reason=%s keyed=true",
+                         policy.CASE_CREATE, actor_id, phase, reason)
+            if phase == "commit":
+                raise CaseCreationOutcomeUnknown()
+            raise CaseOperationUnavailable(reason)
+        if denial is not None:
+            raise self._deny(policy.CASE_CREATE, actor_id, denial)
+        if existing is not None:
+            if (existing["fingerprint_version"] == FINGERPRINT_VERSION
+                    and existing["request_fingerprint"] == fingerprint):
+                logger.info("authz.allowed action=%s actor_id=%s organization_id=%s case_id=%s "
+                            "idempotency=replay", policy.CASE_CREATE, actor_id,
+                            existing["organization_id"], existing["case_id"])
+                return KeyedCaseCreation(True, {"id": existing["case_id"],
+                                                "organization_id": existing["organization_id"]})
+            logger.info("authz.denied action=%s actor_id=%s reason=idempotency_payload_mismatch",
+                        policy.CASE_CREATE, actor_id)
+            raise IdempotencyPayloadMismatch()
+        assert created is not None
+        logger.info("authz.allowed action=%s actor_id=%s organization_id=%s case_id=%s "
+                    "idempotency=created", policy.CASE_CREATE, actor_id,
+                    created["organization_id"], created["id"])
+        return KeyedCaseCreation(False, {field: created[field] for field in CASE_FIELDS})
 
     # ----- read ---------------------------------------------------------------------
 
@@ -361,6 +535,7 @@ class AuthorizedCaseOperations:
 
 
 DATABASE_URL_ENV = "DATABASE_URL"
+IDEMPOTENCY_WAIT_ENV = "EAISO_IDEMPOTENCY_WAIT_MS"
 
 
 class OperationsConfigurationError(Exception):
@@ -385,6 +560,18 @@ def _database_url_from_environment() -> str:
     return dsn
 
 
+def _idempotency_wait_from_environment() -> int:
+    import os
+
+    raw = os.environ.get(IDEMPOTENCY_WAIT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_IDEMPOTENCY_WAIT_MS
+    if not raw.isdigit() or not 1 <= int(raw) <= 9000:
+        raise OperationsConfigurationError(
+            f"{IDEMPOTENCY_WAIT_ENV} must be an integer number of milliseconds from 1 to 9000")
+    return int(raw)
+
+
 def operations_from_environment(dsn: str | None = None,
                                 store_path: Path | None = None) -> AuthorizedCaseOperations:
     """Build the layer with the real credential resolver from server-side configuration.
@@ -396,10 +583,13 @@ def operations_from_environment(dsn: str | None = None,
     Called without arguments (as the HTTP application does), the database URL
     comes from the server's ``DATABASE_URL`` environment variable and the
     credential store from ``EAISO_CREDENTIALS_FILE`` (default
-    ``.local/test-credentials.json``). Missing or invalid configuration raises
+    ``.local/test-credentials.json``); the keyed-create bounded wait from
+    ``EAISO_IDEMPOTENCY_WAIT_MS`` (default 2000). Missing or invalid configuration raises
     ``OperationsConfigurationError`` or ``CredentialConfigurationError``, so
     startup fails instead of serving requests.
     """
     if dsn is None:
         dsn = _database_url_from_environment()
-    return AuthorizedCaseOperations(resolver_from_environment(dsn, store_path), dsn)
+    wait_ms = _idempotency_wait_from_environment()
+    return AuthorizedCaseOperations(resolver_from_environment(dsn, store_path), dsn,
+                                    idempotency_wait_ms=wait_ms)

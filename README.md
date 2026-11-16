@@ -59,7 +59,8 @@ No real customer data or private third-party project materials are used.
 - [x] Implement local opaque credential verification (identity only) — [58/58 tests passed](tests/credential-verification-results.md) (9 PostgreSQL-backed, 49 offline). No HTTP boundary uses it yet.
 - [x] Implement centralized case authorization (create, read, list) with a structural no-bypass check — [76/76 tests passed](tests/case-authorization-results.md) (29 PostgreSQL-backed, including revocation interleavings; 47 offline). This is a Python boundary, not yet an HTTP API.
 - [x] Independently validate the integrated identity and authorization boundary before HTTP work — [security-readiness results](tests/authorization-boundary-readiness-results.md): adversarial review (no exploitable flaw found in the authorization layer; structural-check gaps fixed), fresh PostgreSQL 16 reproduction, real commit-failure and deadlock tests, and a restricted database-role assessment. Recommendation: go for local HTTP integration, with conditions.
-- [x] Expose the authorized case operations through a localhost-only HTTP API (`POST /cases`, `GET /cases/{id}`, `GET /cases`) — [HTTP case API results](tests/http-case-api-results.md): bearer authentication, safe error envelope, and HTTP tenant-isolation tests against PostgreSQL. Keyed idempotent creation (interim `501`), cursor pagination, HTTP status transitions, and database-enforced isolation are not implemented; this is a local demonstration, not a deployable service.
+- [x] Expose the authorized case operations through a localhost-only HTTP API (`POST /cases`, `GET /cases/{id}`, `GET /cases`) — [HTTP case API results](tests/http-case-api-results.md): bearer authentication, safe error envelope, and HTTP tenant-isolation tests against PostgreSQL. Cursor pagination, HTTP status transitions, and database-enforced isolation are not implemented; this is a local demonstration, not a deployable service.
+- [x] Implement keyed idempotent case creation (ADR-0004) — [keyed case creation results](tests/keyed-case-creation-results.md): RFC 9651 `Idempotency-Key` parsing, RFC 8785 fingerprints, authorization before key lookup, actor-and-customer key scope, atomic case-and-record commit, `201`/`200` replay/`422`/`503`, and real concurrency and lost-commit tests against PostgreSQL. Records never expire (local demonstration only).
 - [ ] Deliver an authorized end-to-end case workflow.
 - [ ] Add repeatable application deployment and operational evidence.
 
@@ -87,7 +88,8 @@ The recorded model run shows that the integration can invoke a hosted model, val
 - [Local credential verification](docs/authentication-authorization-sequence.md#51-implemented-local-credential-resolver) — opaque test credential format, digest store, outcomes, rotation and revocation, and limitations.
 - [Case authorization](docs/authentication-authorization-sequence.md#71-implemented-authorized-case-operations) — the authorized-case-operations layer, outcomes, and structural no-bypass check.
 - [Case authorization results](tests/case-authorization-results.md) — observed permission-matrix, cross-customer, revocation-concurrency, and structural-check results.
-- [HTTP case API results](tests/http-case-api-results.md) — executed HTTP tests: authentication, error mapping, tenant isolation, revocation, failure behavior, and the interim idempotency and pagination rules.
+- [HTTP case API results](tests/http-case-api-results.md) — executed HTTP tests: authentication, error mapping, tenant isolation, revocation, failure behavior, and the interim pagination rule.
+- [Keyed case creation results](tests/keyed-case-creation-results.md) — idempotency migration, header and fingerprint conformance, transaction algorithm, concurrency, isolation, and real commit-ambiguity evidence.
 - [Authorization boundary readiness results](tests/authorization-boundary-readiness-results.md) — independent security review, fresh-environment reproduction, credential-revocation timing, database-privilege assessment, and the HTTP readiness recommendation.
 - [Credential verification results](tests/credential-verification-results.md) — observed offline and PostgreSQL-backed results for the credential resolver.
 - [Identity and role-grant integrity results](tests/identity-grant-integrity-results.md) — observed schema, eligibility, provisioning, and concurrency test results for the identity migration.
@@ -312,7 +314,7 @@ A localhost-only FastAPI application exposes `POST /cases`, `GET /cases/{id}`, a
    Invoke-RestMethod "http://127.0.0.1:8000/cases?organization_id=<organization-uuid>&limit=20" -Headers $h
    ```
 
-Interim limits: any `Idempotency-Key` header gets `501` and creates nothing (keyed creation, ADR-0004, is not implemented), so an ambiguous failure followed by a retry can create a duplicate case. Lists report `has_more` but have no cursor. There are no status-transition, approval, or administrative routes.
+To make a create safe to retry, send an `Idempotency-Key` header with a quoted, high-entropy value, for example `-Headers @{ Authorization = "Bearer <credential>"; "Idempotency-Key" = '"8e03978e-40d5-43e8-bc93-6894a57f9324"' }`. A retry with the same key and payload returns `200` with the original case's `id` only; a changed payload gets `422`. Without a key, an ambiguous failure followed by a retry can create a duplicate case. Lists report `has_more` but have no cursor. There are no status-transition, approval, or administrative routes.
 
 ## Data and evidence
 

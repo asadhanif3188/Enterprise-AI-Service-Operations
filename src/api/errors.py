@@ -19,6 +19,8 @@ from src.case_authorization import (
     CaseCreationOutcomeUnknown,
     CaseNotFound,
     CaseOperationUnavailable,
+    IdempotencyPayloadMismatch,
+    IdempotencyRequestInFlight,
     InvalidCaseRequest,
     OrganizationAccessDenied,
 )
@@ -44,6 +46,7 @@ _INVALID_MESSAGES = {
     "description_too_long": "description is too long",
     "description_invalid_character": "description contains an invalid character",
     "limit_out_of_range": "limit must be between 1 and 100",
+    "idempotency_key_malformed": "Idempotency-Key is invalid",
 }
 
 
@@ -111,12 +114,26 @@ async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse
     if isinstance(exc, CaseNotFound):
         return error_response(request, 404, "case_not_found", "Case not found")
     if isinstance(exc, CaseCreationOutcomeUnknown):
-        # Never success and never a claimed rollback. Unkeyed creation is not
-        # retry-safe, so a blind retry may create a duplicate case.
+        # Never success and never a claimed rollback. A keyed request resolves
+        # the outcome by retrying with the same key; an unkeyed retry may
+        # create a duplicate case.
+        if request.headers.get("idempotency-key") is not None:
+            return error_response(
+                request, 500, "case_creation_outcome_unknown",
+                "The case may or may not have been created. Retry with the same "
+                "Idempotency-Key and payload to learn the outcome.")
         return error_response(
             request, 500, "case_creation_outcome_unknown",
             "The case may or may not have been created. Retrying this request may create "
             "a duplicate case.")
+    if isinstance(exc, IdempotencyPayloadMismatch):
+        return error_response(request, 422, "idempotency_payload_mismatch",
+                              "Idempotency key was already used with a different request")
+    if isinstance(exc, IdempotencyRequestInFlight):
+        # The competing request's outcome is unknown; this request created nothing.
+        return error_response(request, 503, "idempotency_request_in_flight",
+                              "A request with this idempotency key is still in progress. "
+                              "Retry with the same key.")
     if isinstance(exc, InvalidCaseRequest):
         return error_response(request, 422, "invalid_request",
                               _INVALID_MESSAGES.get(exc.reason, "Invalid request"))

@@ -7,7 +7,7 @@ authorized case operations, and PostgreSQL. They are distinct from the
 Python-layer tests in ``test_case_authorization.py``.
 
 Offline tests (no marker) cover what is decided before the database is
-reached: header syntax, request syntax, idempotency rejection, unsupported
+reached: header syntax, request syntax, Idempotency-Key syntax, unsupported
 routes, startup configuration, and loopback binding. Tests marked ``db`` need
 TEST_DATABASE_URL pointing to ``eaiso_test`` (same safety guards as the
 authorization suite); each builds isolated fictional customers, actors,
@@ -48,9 +48,10 @@ NOT_FOUND = {"error": {"code": "case_not_found", "message": "Case not found"}}
 ORG_DENIED = {"error": {"code": "organization_access_denied",
                         "message": "Not permitted for this organization"}}
 INACTIVE = {"error": {"code": "actor_inactive", "message": "Actor is not active"}}
-IDEMPOTENCY = {"error": {"code": "idempotency_not_implemented",
-                         "message": "Keyed case creation (Idempotency-Key) is not implemented; "
-                                    "no case was created"}}
+INVALID_KEY = {"error": {"code": "invalid_idempotency_key",
+                         "message": "Idempotency-Key must be one RFC 9651 String of 16 to 128 "
+                                    "characters from A-Z, a-z, 0-9, '.', '_', '~', and '-'"}}
+VALID_KEY = '"8e03978e-40d5-43e8-bc93-6894a57f9324"'  # never issued; header syntax only
 
 
 def bearer(credential: str) -> dict:
@@ -132,20 +133,50 @@ def test_unknown_credential_is_the_same_401_offline(offline_client):
     assert comparable_headers(response) == comparable_headers(malformed_token)
 
 
-@pytest.mark.parametrize("key", ['"synthetic-case-create-0001"', "unquoted-key-value-0001", "", "x" * 300])
-def test_any_idempotency_key_is_rejected_with_501_offline(offline_client, key, caplog):
+@pytest.mark.parametrize("key", [
+    "unquoted-key-value-0001",              # token, not a String
+    "8e03978e-40d5-43e8-bc93-6894a57f9324",  # unquoted: parses as a number, then fails
+    "1234567890123456",                     # integer too long
+    "42",                                   # integer
+    '"short"',                              # String outside the pattern (too short)
+    '"' + "x" * 129 + '"',                  # too long
+    '"has space 000000000000"',             # space is outside the pattern
+    '"bad\\escape000000000000"',          # backslash decodes outside the pattern
+    '"bad\\qescape00000000000"',          # invalid escape
+    '"unterminated-key-00000000',           # malformed String
+    "",                                     # empty field value
+    '"key-one-000000000000", "key-two-000000000000"',  # a list, not an Item
+    ":a2V5LWJ5dGVzLTAwMDAwMDAw:",           # byte sequence
+    "?1",                                   # boolean
+])
+def test_malformed_idempotency_keys_are_400_offline(offline_client, key, caplog):
     caplog.set_level(logging.DEBUG)
     response = offline_client.post("/cases", headers={"Idempotency-Key": key, **SOME_TOKEN, **JSON},
                                    json={"organization_id": str(uuid4()), "title": "t", "description": "d"})
-    assert_error(response, 501, IDEMPOTENCY)
-    if key:
+    assert_error(response, 400, INVALID_KEY)
+    if len(key) > 3:
         assert key not in response.text and key not in caplog.text
 
 
-def test_idempotency_rejection_precedes_authentication_offline(offline_client):
-    response = offline_client.post("/cases", headers={"Idempotency-Key": '"k-0000000000000001"'},
+def test_non_ascii_idempotency_key_is_400_offline(offline_client):
+    response = offline_client.post("/cases", headers=[("Idempotency-Key", '"caf\u00e9-key-0000000000"'.encode()),
+                                                      ("Authorization", SOME_TOKEN["Authorization"]),
+                                                      ("Content-Type", "application/json")],
+                                   json={"organization_id": str(uuid4()), "title": "t", "description": "d"})
+    assert_error(response, 400, INVALID_KEY)
+
+
+def test_idempotency_key_syntax_is_checked_before_authentication_offline(offline_client):
+    response = offline_client.post("/cases", headers={"Idempotency-Key": "not-a-string-item-000"},
                                    content=b"not json")
-    assert_error(response, 501, IDEMPOTENCY)
+    assert_error(response, 400, INVALID_KEY)
+
+
+@pytest.mark.parametrize("value", [VALID_KEY, VALID_KEY + "; ttl=60", "  " + VALID_KEY + "  "])
+def test_valid_idempotency_key_proceeds_to_authentication_offline(offline_client, value):
+    response = offline_client.post("/cases", headers={"Idempotency-Key": value, **SOME_TOKEN, **JSON},
+                                   json={"organization_id": str(uuid4()), "title": "t", "description": "d"})
+    assert_error(response, 401, UNAUTHENTICATED)
 
 
 @pytest.mark.parametrize("content_type", [None, "text/plain", "application/x-www-form-urlencoded",
@@ -203,12 +234,24 @@ def test_trailing_slash_is_not_redirected_offline(offline_client):
     assert body_of(response)["error"]["code"] == "route_not_found"
 
 
-def test_idempotency_key_header_name_variants_are_rejected_offline(offline_client):
-    """HTTP review regression: an underscore variant reached the create path."""
-    for name in ("Idempotency_Key", "IDEMPOTENCY_KEY", "idempotency-KEY"):
-        response = offline_client.post("/cases", headers={name: '"k-0000000000000001"', **SOME_TOKEN, **JSON},
-                                       json={"organization_id": str(uuid4()), "title": "t", "description": "d"})
-        assert_error(response, 501, IDEMPOTENCY)
+def test_idempotency_key_header_name_variants_and_duplicates_are_rejected_offline(offline_client):
+    """HTTP review regression: an underscore variant must never be ignored."""
+    body = {"organization_id": str(uuid4()), "title": "t", "description": "d"}
+    for name in ("Idempotency_Key", "IDEMPOTENCY_KEY"):
+        response = offline_client.post("/cases", headers={name: VALID_KEY, **SOME_TOKEN, **JSON}, json=body)
+        assert_error(response, 400, INVALID_KEY)
+    for pair in ((VALID_KEY, VALID_KEY), (VALID_KEY, '"another-key-000000000"')):
+        response = offline_client.post("/cases", headers=[("Idempotency-Key", pair[0]), ("Idempotency-Key", pair[1]),
+                                                          ("Authorization", SOME_TOKEN["Authorization"]),
+                                                          ("Content-Type", "application/json")], json=body)
+        assert_error(response, 400, INVALID_KEY)
+    mixed = offline_client.post("/cases", headers=[("Idempotency-Key", VALID_KEY), ("Idempotency_Key", VALID_KEY),
+                                                   ("Authorization", SOME_TOKEN["Authorization"]),
+                                                   ("Content-Type", "application/json")], json=body)
+    assert_error(mixed, 400, INVALID_KEY)
+    # Header names are case-insensitive in HTTP: this is the same field, so it is parsed.
+    upper = offline_client.post("/cases", headers={"IDEMPOTENCY-KEY": VALID_KEY, **SOME_TOKEN, **JSON}, json=body)
+    assert_error(upper, 401, UNAUTHENTICATED)
 
 
 def test_non_object_and_oversized_bodies_offline(offline_client):
@@ -620,17 +663,6 @@ def test_validation_and_authentication_ordering(api, world):
         assert_error(api.get(f"/cases?organization_id={world.org_a}&limit={limit}", headers=valid), 400,
                      {"error": {"code": "invalid_parameter", "message": "limit must be between 1 and 100"}})
     assert world.snapshot() == before
-
-
-@pytest.mark.db
-def test_idempotency_key_never_creates_a_case(api, world, caplog):
-    caplog.set_level(logging.DEBUG)
-    before = world.snapshot()
-    key = '"synthetic-case-create-' + uuid4().hex + '"'
-    response = create(api, world, "engineer_a", world.org_a, **{"Idempotency-Key": key})
-    assert_error(response, 501, IDEMPOTENCY)
-    assert world.snapshot() == before
-    assert key.strip('"') not in caplog.text and key.strip('"') not in response.text
 
 
 # ----- failure behavior ---------------------------------------------------------
