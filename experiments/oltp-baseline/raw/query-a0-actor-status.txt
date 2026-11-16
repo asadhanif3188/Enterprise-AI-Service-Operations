@@ -1,0 +1,93 @@
+# query-a0-actor-status: raw EXPLAIN output from sql/query_a0_actor_status.sql
+# database=eaiso_baseline container=eaiso-day14-baseline image=postgres:16
+# Each run is a separate psql session (new backend).
+
+=== run 1 of 6 | started_utc 2026-11-16T11:34:01Z | first execution after PostgreSQL restart: shared_buffers empty; OS/VM page cache not controlled ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.033..0.035 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared read=1
+ Planning:
+   Buffers: shared hit=42 read=22
+ Planning Time: 0.439 ms
+ Execution Time: 0.049 ms
+(9 rows)
+
+
+=== run 2 of 6 | started_utc 2026-11-16T11:34:01Z | repeat: shared_buffers warm from earlier runs ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.005..0.007 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.309 ms
+ Execution Time: 0.022 ms
+(9 rows)
+
+
+=== run 3 of 6 | started_utc 2026-11-16T11:34:02Z | repeat: shared_buffers warm from earlier runs ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.007..0.009 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.407 ms
+ Execution Time: 0.026 ms
+(9 rows)
+
+
+=== run 4 of 6 | started_utc 2026-11-16T11:34:03Z | repeat: shared_buffers warm from earlier runs ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.004..0.006 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.233 ms
+ Execution Time: 0.019 ms
+(9 rows)
+
+
+=== run 5 of 6 | started_utc 2026-11-16T11:34:03Z | repeat: shared_buffers warm from earlier runs ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.005..0.007 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.245 ms
+ Execution Time: 0.020 ms
+(9 rows)
+
+
+=== run 6 of 6 | started_utc 2026-11-16T11:34:03Z | repeat: shared_buffers warm from earlier runs ===
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.006..0.008 rows=1 loops=1)
+   Output: is_active
+   Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+   Rows Removed by Filter: 36
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.316 ms
+ Execution Time: 0.025 ms
+(9 rows)
+

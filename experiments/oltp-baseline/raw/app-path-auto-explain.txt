@@ -1,0 +1,125 @@
+# Supplementary: auto_explain log for the real get_case() and list_cases() calls
+# (capture_app_path.py, psycopg bound parameters). Server log since 2026-11-16T11:34:22Z.
+2026-11-16 11:34:24.910 UTC [89] LOG:  duration: 0.034 ms  plan:
+	Query Text: SELECT is_active FROM actor WHERE id = $1
+	Query Parameters: $1 = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'
+	Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.021..0.027 rows=1 loops=1)
+	  Output: is_active
+	  Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+	  Rows Removed by Filter: 36
+	  Buffers: shared hit=1
+2026-11-16 11:34:24.916 UTC [89] LOG:  duration: 0.360 ms  plan:
+	Query Text: SELECT c.id, c.organization_id, c.title, c.description,
+	                                  c.status, c.version, c.created_at, c.updated_at
+	                             FROM case_record AS c
+	                             JOIN organization_membership AS m
+	                               ON m.organization_id = c.organization_id
+	                              AND m.actor_id = $1
+	                              AND m.is_active
+	                              AND m.role = ANY($2)
+	                             JOIN actor AS a
+	                               ON a.id = m.actor_id
+	                              AND a.is_active
+	                            WHERE c.id = $3
+	Query Parameters: $1 = '1a1e8387-9f2a-572f-3ade-0f8211c630f8', $2 = '{service_engineer,service_manager}', $3 = '7dd97bf9-c05f-8ef8-ab05-3809f2576dc7'
+	Nested Loop  (cost=0.29..11.53 rows=1 width=413) (actual time=0.302..0.314 rows=1 loops=1)
+	  Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+	  Buffers: shared hit=3 read=2
+	  ->  Nested Loop  (cost=0.29..10.05 rows=1 width=429) (actual time=0.290..0.294 rows=1 loops=1)
+	        Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at, m.actor_id
+	        Inner Unique: true
+	        Join Filter: (c.organization_id = m.organization_id)
+	        Buffers: shared hit=2 read=2
+	        ->  Index Scan using case_record_pkey on public.case_record c  (cost=0.29..8.31 rows=1 width=413) (actual time=0.264..0.267 rows=1 loops=1)
+	              Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+	              Index Cond: (c.id = '7dd97bf9-c05f-8ef8-ab05-3809f2576dc7'::uuid)
+	              Buffers: shared hit=1 read=2
+	        ->  Seq Scan on public.organization_membership m  (cost=0.00..1.73 rows=1 width=32) (actual time=0.018..0.018 rows=1 loops=1)
+	              Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+	              Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+	              Buffers: shared hit=1
+	  ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.011..0.016 rows=1 loops=1)
+	        Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+	        Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+	        Rows Removed by Filter: 36
+	        Buffers: shared hit=1
+2026-11-16 11:34:24.992 UTC [90] LOG:  duration: 42.352 ms  plan:
+	Query Text: SELECT s.actor_active, g.authorized,
+	                              c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	                         FROM (SELECT (SELECT is_active FROM actor WHERE id = $1)
+	                                      AS actor_active) AS s
+	                        CROSS JOIN LATERAL (
+	                              SELECT EXISTS (
+	                                  SELECT 1
+	                                    FROM actor AS a
+	                                    JOIN organization_membership AS m ON m.actor_id = a.id
+	                                   WHERE a.id = $1
+	                                     AND a.is_active
+	                                     AND m.organization_id = $2
+	                                     AND m.is_active
+	                                     AND m.role = ANY($3)
+	                              ) AS authorized) AS g
+	                         LEFT JOIN LATERAL (
+	                              SELECT c.id, c.organization_id, c.title, c.status,
+	                                     c.version, c.created_at
+	                                FROM case_record AS c
+	                               WHERE g.authorized
+	                                 AND c.organization_id = $2
+	                               ORDER BY c.created_at, c.id
+	                               LIMIT $4) AS c ON TRUE
+	                        ORDER BY c.created_at, c.id
+	Query Parameters: $1 = '1a1e8387-9f2a-572f-3ade-0f8211c630f8', $2 = '8af08632-4147-4fce-49b8-0f34277f37f1', $3 = '{service_engineer,service_manager}', $4 = '21'
+	Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=42.265..42.277 rows=21 loops=1)
+	  Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	  Sort Key: c.created_at, c.id
+	  Sort Method: quicksort  Memory: 27kB
+	  Buffers: shared hit=1011 read=1766
+	  InitPlan 1 (returns $0)
+	    ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.015..0.019 rows=1 loops=1)
+	          Output: actor.is_active
+	          Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+	          Rows Removed by Filter: 36
+	          Buffers: shared hit=1
+	  InitPlan 2 (returns $1)
+	    ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.026..0.027 rows=1 loops=1)
+	          Buffers: shared hit=2
+	          ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=1)
+	                Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+	                Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+	                Buffers: shared hit=1
+	          ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.020..0.020 rows=1 loops=1)
+	                Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+	                Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+	                Buffers: shared hit=1
+	  ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=42.225..42.244 rows=21 loops=1)
+	        Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	        Buffers: shared hit=1005 read=1766
+	        ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.000..0.001 rows=1 loops=1)
+	        ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=42.169..42.179 rows=21 loops=1)
+	              Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	              Buffers: shared hit=1002 read=1766
+	              InitPlan 3 (returns $2)
+	                ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.009..0.011 rows=1 loops=1)
+	                      Buffers: shared hit=2
+	                      ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.005..0.005 rows=1 loops=1)
+	                            Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+	                            Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+	                            Buffers: shared hit=1
+	                      ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.004..0.005 rows=1 loops=1)
+	                            Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+	                            Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+	                            Buffers: shared hit=1
+	              ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=42.167..42.171 rows=21 loops=1)
+	                    Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	                    Sort Key: c.created_at, c.id
+	                    Sort Method: top-N heapsort  Memory: 27kB
+	                    Buffers: shared hit=1002 read=1766
+	                    ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.032..34.112 rows=40000 loops=1)
+	                          Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+	                          One-Time Filter: $2
+	                          Buffers: shared hit=1002 read=1766
+	                          ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.022..28.127 rows=40000 loops=1)
+	                                Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+	                                Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+	                                Rows Removed by Filter: 10000
+	                                Buffers: shared hit=1000 read=1766

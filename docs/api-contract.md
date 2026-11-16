@@ -304,6 +304,8 @@ LIMIT $2;
 
 No `case_record(organization_id, created_at, id)` index is added yet. The next measurement increment records `EXPLAIN (ANALYZE, BUFFERS)` plans using the **existing** primary-key and unique indexes. A later increment compares index changes using a controlled data generator and representative workloads.
 
+**Baseline recorded.** The pre-optimization plans are in [`experiments/oltp-baseline/`](../experiments/oltp-baseline/README.md). They measure the statements the application actually sends from `get_case()` and `list_cases()`, including their membership and actor predicates, not the simplified candidate shapes above.
+
 ## 11. Acceptance tests and proof boundaries
 
 The statuses below refer to **HTTP** tests through the local API against PostgreSQL ([HTTP case API results](../tests/http-case-api-results.md)). Python-layer equivalents are recorded separately ([case authorization results](../tests/case-authorization-results.md)). Keyed-creation rows are from the [keyed case creation results](../tests/keyed-case-creation-results.md).
@@ -326,7 +328,7 @@ The statuses below refer to **HTTP** tests through the local API against Postgre
 | Same key value used in two organizations | Independent requests; one case for each organization | PASSED (HTTP) |
 | Simulated failure after the case insert in a keyed create | Neither the case nor the idempotency record persists | PASSED (HTTP; simulated and real faults) |
 | Identical-content requests without a key | Two distinct cases | PASSED (HTTP) |
-| Case read and list query plans captured before new indexes | Actual plans, row counts, and PostgreSQL version recorded | NOT MEASURED |
+| Case read and list query plans captured before new indexes | Actual plans, row counts, and PostgreSQL version recorded | RECORDED ([OLTP baseline](../experiments/oltp-baseline/README.md); plan evidence, not an HTTP test) |
 
 Database-mutating tests use the dedicated `eaiso_test` database. The existing case-service test `test_wrong_organization_scope_cannot_read_or_update` ([results](../tests/case-operations-results.md)) demonstrates query scoping by a caller-supplied organization ID. It is **not** proof of HTTP-level tenant authorization. HTTP tests must authenticate a verified demonstration actor, make the HTTP request, and check both the response and the persisted state. Additional negative tests should cover absent or disabled memberships, role mismatches, and unknown case IDs.
 
@@ -337,7 +339,7 @@ Done: server-controlled identities and memberships; the authorized Python layer;
 Next, each as its own increment:
 
 1. Cursor pagination for `GET /cases`, replacing the interim `has_more` shape.
-2. Query-plan captures before any new index.
+2. Query-plan captures before any new index. Done: [OLTP baseline](../experiments/oltp-baseline/README.md); index changes must be compared against it.
 3. Finite idempotency-record retention, expiry semantics, and cleanup, before any use beyond the local demonstration.
 4. Verified-actor attribution on cases and events, and any HTTP status transition, only with the approval checks ADR-0003 requires.
 

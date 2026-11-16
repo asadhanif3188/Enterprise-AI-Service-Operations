@@ -1,0 +1,387 @@
+# query-b-list-cases-large-org: raw EXPLAIN output from sql/query_b_list_cases.sql
+# database=eaiso_baseline container=eaiso-day14-baseline image=postgres:16
+# Each run is a separate psql session (new backend).
+
+=== run 1 of 6 | started_utc 2026-11-16T11:34:11Z | first execution after PostgreSQL restart: shared_buffers empty; OS/VM page cache not controlled ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=98.499..98.513 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=9 read=2768
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.024..0.031 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.040..0.041 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.005..0.005 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.030..0.030 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=98.386..98.412 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=3 read=2768
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.002 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=98.297..98.312 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared read=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.039..0.042 rows=1 loops=1)
+                       Buffers: shared read=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.023..0.023 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared read=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.015..0.016 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared read=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=98.294..98.299 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared read=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.052..81.673 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared read=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.011..69.301 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared read=2766
+ Planning:
+   Buffers: shared hit=205 read=28
+ Planning Time: 1.501 ms
+ Execution Time: 98.667 ms
+(58 rows)
+
+
+=== run 2 of 6 | started_utc 2026-11-16T11:34:12Z | repeat: shared_buffers warm from earlier runs ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=40.569..40.577 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=2777
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.017..0.020 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.019..0.020 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.013..0.013 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=40.490..40.508 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=2771
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.002 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=40.438..40.447 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared hit=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.013..0.015 rows=1 loops=1)
+                       Buffers: shared hit=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.008..0.008 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared hit=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.004..0.005 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared hit=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=40.436..40.439 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared hit=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.022..26.104 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared hit=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.006..16.064 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared hit=2766
+ Planning:
+   Buffers: shared hit=233
+ Planning Time: 1.761 ms
+ Execution Time: 40.700 ms
+(58 rows)
+
+
+=== run 3 of 6 | started_utc 2026-11-16T11:34:13Z | repeat: shared_buffers warm from earlier runs ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=32.456..32.464 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=2777
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.017..0.020 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.017..0.018 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.011..0.011 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=32.396..32.411 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=2771
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.001 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=32.345..32.353 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared hit=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.011..0.013 rows=1 loops=1)
+                       Buffers: shared hit=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.006..0.006 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared hit=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.004..0.005 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared hit=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=32.343..32.346 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared hit=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.017..21.541 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared hit=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.004..12.808 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared hit=2766
+ Planning:
+   Buffers: shared hit=233
+ Planning Time: 1.058 ms
+ Execution Time: 32.557 ms
+(58 rows)
+
+
+=== run 4 of 6 | started_utc 2026-11-16T11:34:14Z | repeat: shared_buffers warm from earlier runs ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=23.329..23.335 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=2777
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.012..0.014 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.013..0.013 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.008..0.008 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=23.279..23.290 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=2771
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.001 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=23.243..23.248 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared hit=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.010..0.011 rows=1 loops=1)
+                       Buffers: shared hit=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.006..0.006 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared hit=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.003..0.004 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared hit=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=23.242..23.243 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared hit=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.016..15.206 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared hit=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.004..8.948 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared hit=2766
+ Planning:
+   Buffers: shared hit=233
+ Planning Time: 1.058 ms
+ Execution Time: 23.414 ms
+(58 rows)
+
+
+=== run 5 of 6 | started_utc 2026-11-16T11:34:15Z | repeat: shared_buffers warm from earlier runs ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=45.736..45.747 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=2777
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.023..0.028 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.024..0.025 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.015..0.016 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=45.654..45.674 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=2771
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.002 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=45.585..45.595 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared hit=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.013..0.015 rows=1 loops=1)
+                       Buffers: shared hit=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.007..0.008 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared hit=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.004..0.005 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared hit=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=45.582..45.586 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared hit=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.075..28.973 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared hit=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.059..16.921 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared hit=2766
+ Planning:
+   Buffers: shared hit=233
+ Planning Time: 1.432 ms
+ Execution Time: 45.869 ms
+(58 rows)
+
+
+=== run 6 of 6 | started_utc 2026-11-16T11:34:16Z | repeat: shared_buffers warm from earlier runs ===
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4478.13..4478.18 rows=21 width=83) (actual time=25.354..25.360 rows=21 loops=1)
+   Output: ($0), ($1), c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+   Sort Key: c.created_at, c.id
+   Sort Method: quicksort  Memory: 27kB
+   Buffers: shared hit=2777
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on public.actor  (cost=0.00..1.46 rows=1 width=1) (actual time=0.011..0.014 rows=1 loops=1)
+           Output: actor.is_active
+           Filter: (actor.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid)
+           Rows Removed by Filter: 36
+           Buffers: shared hit=1
+   InitPlan 2 (returns $1)
+     ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.013..0.013 rows=1 loops=1)
+           Buffers: shared hit=2
+           ->  Seq Scan on public.actor a  (cost=0.00..1.46 rows=1 width=16) (actual time=0.002..0.002 rows=1 loops=1)
+                 Output: a.id, a.display_name, a.is_active, a.affiliation_type, a.home_organization_id, a.created_at
+                 Filter: (a.is_active AND (a.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                 Buffers: shared hit=1
+           ->  Seq Scan on public.organization_membership m  (cost=0.00..1.86 rows=1 width=16) (actual time=0.009..0.009 rows=1 loops=1)
+                 Output: m.actor_id, m.organization_id, m.role, m.is_active, m.created_at
+                 Filter: (m.is_active AND (m.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                 Buffers: shared hit=1
+   ->  Nested Loop Left Join  (cost=4472.60..4472.88 rows=21 width=83) (actual time=25.303..25.315 rows=21 loops=1)
+         Output: $0, $1, c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+         Buffers: shared hit=2771
+         ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.001..0.001 rows=1 loops=1)
+         ->  Limit  (cost=4472.60..4472.66 rows=21 width=81) (actual time=25.266..25.273 rows=21 loops=1)
+               Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+               Buffers: shared hit=2768
+               InitPlan 3 (returns $2)
+                 ->  Nested Loop  (cost=0.00..3.33 rows=1 width=0) (actual time=0.010..0.011 rows=1 loops=1)
+                       Buffers: shared hit=2
+                       ->  Seq Scan on public.actor a_1  (cost=0.00..1.46 rows=1 width=16) (actual time=0.005..0.006 rows=1 loops=1)
+                             Output: a_1.id, a_1.display_name, a_1.is_active, a_1.affiliation_type, a_1.home_organization_id, a_1.created_at
+                             Filter: (a_1.is_active AND (a_1.id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid))
+                             Buffers: shared hit=1
+                       ->  Seq Scan on public.organization_membership m_1  (cost=0.00..1.86 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=1)
+                             Output: m_1.actor_id, m_1.organization_id, m_1.role, m_1.is_active, m_1.created_at
+                             Filter: (m_1.is_active AND (m_1.role = ANY ('{service_engineer,service_manager}'::text[])) AND (m_1.actor_id = '1a1e8387-9f2a-572f-3ade-0f8211c630f8'::uuid) AND (m_1.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid))
+                             Buffers: shared hit=1
+               ->  Sort  (cost=4469.27..4569.26 rows=39993 width=81) (actual time=25.265..25.268 rows=21 loops=1)
+                     Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                     Sort Key: c.created_at, c.id
+                     Sort Method: top-N heapsort  Memory: 27kB
+                     Buffers: shared hit=2768
+                     ->  Result  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.015..16.265 rows=40000 loops=1)
+                           Output: c.id, c.organization_id, c.title, c.status, c.version, c.created_at
+                           One-Time Filter: $2
+                           Buffers: shared hit=2768
+                           ->  Seq Scan on public.case_record c  (cost=0.00..3391.00 rows=39993 width=81) (actual time=0.004..9.460 rows=40000 loops=1)
+                                 Output: c.id, c.organization_id, c.title, c.description, c.status, c.version, c.created_at, c.updated_at
+                                 Filter: (c.organization_id = '8af08632-4147-4fce-49b8-0f34277f37f1'::uuid)
+                                 Rows Removed by Filter: 10000
+                                 Buffers: shared hit=2766
+ Planning:
+   Buffers: shared hit=233
+ Planning Time: 1.000 ms
+ Execution Time: 25.440 ms
+(58 rows)
+

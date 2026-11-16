@@ -1,0 +1,9 @@
+# Setup log
+started_utc: 2026-11-16T11:33:49Z
+applied db/001_init.sql (ON_ERROR_STOP=1): ok
+applied db/002_case_status_events.sql (ON_ERROR_STOP=1): ok
+applied db/003_actor_identity_and_grants.sql (ON_ERROR_STOP=1): ok
+applied db/004_case_creation_idempotency.sql (ON_ERROR_STOP=1): ok
+loaded sql/fixture.sql: ok
+VACUUM (ANALYZE) on database eaiso_baseline: ok
+finished_utc: 2026-11-16T11:33:55Z

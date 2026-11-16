@@ -1,0 +1,24 @@
+# Row counts after all captures (must equal environment.txt)
+captured_utc: 2026-11-16T11:34:27Z
+        table_name         | row_count 
+---------------------------+-----------
+ actor                     |        37
+ ai_suggestion             |         0
+ case_creation_idempotency |         0
+ case_record               |     50000
+ case_status_event         |         0
+ organization              |         3
+ organization_membership   |        49
+(7 rows)
+
+          relname          | last_autovacuum | last_autoanalyze 
+---------------------------+-----------------+------------------
+ actor                     |                 | 
+ ai_suggestion             |                 | 
+ case_creation_idempotency |                 | 
+ case_record               |                 | 
+ case_status_event         |                 | 
+ organization              |                 | 
+ organization_membership   |                 | 
+(7 rows)
+

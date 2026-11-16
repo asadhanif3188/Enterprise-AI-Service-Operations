@@ -1,0 +1,4 @@
+# Keep LF on every checkout (including Windows with core.autocrlf=true):
+# bash rejects CRLF scripts, and the SQL is fed to psql inside a Linux container.
+*.sh  text eol=lf
+*.sql text eol=lf

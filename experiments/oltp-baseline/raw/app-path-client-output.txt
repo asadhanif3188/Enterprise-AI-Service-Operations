@@ -1,0 +1,2 @@
+get_case: returned case in organization 8af08632-4147-4fce-49b8-0f34277f37f1
+list_cases: 20 items, has_more=True
