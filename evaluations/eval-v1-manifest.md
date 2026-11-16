@@ -11,6 +11,8 @@ rubric v0.2 approved; original Day 13 gate **PASS**. See the
 **Dataset:** [`eval-v1.jsonl`](eval-v1.jsonl), version `eval-v1`, 20 cases.
 
 **Rubric:** [`eval-v1-rubric.md`](eval-v1-rubric.md), v0.2, approved without amendment by AO-001 on 2026-11-16.
+A post-freeze editorial revision clarified status wording only; see the
+[post-freeze change history](#post-freeze-change-history).
 
 **Reference review:** [`eval-v1-reference-review.md`](eval-v1-reference-review.md),
 an AI-assisted consolidated review (Day 13B). It is not an approval record.
@@ -298,3 +300,32 @@ new dataset version or revision with a change-log entry (change control item 4).
 The frozen bytes must stay reproducible for any reported run. Model execution
 and scoring are a separate, later authorized increment; no predictions, accuracy,
 latency, token, cost or quality results exist for eval-v1.
+
+The freeze record above stays valid for its original revision: the freeze
+revision is `f40d06e` (`docs: freeze eval-v1 dataset`), and its rubric checksum
+`af003d57…` describes the rubric bytes at that revision. Later editorial changes
+are listed below; they do not replace the freeze record.
+
+## Post-freeze change history
+
+| # | Date | Artifact | Change type | Reason | Effect on scoring and data |
+|---|---|---|---|---|---|
+| 1 | 2026-11-16 (Day 14) | [`eval-v1-rubric.md`](eval-v1-rubric.md) | Editorial clarification, documentation only | Historical Day 13A wording ("approval pending", "unapproved annotation proposals", 002 owner decision outstanding, Day 13 gate PARTIAL) read as current status. Those passages are now labeled *Historical* and followed by the approved outcome from approval record 1. | **None.** No scoring dimension, decision rule, denominator, null-reference interpretation, output schema, prompt version, label or input changed. Dataset untouched. |
+
+Change 1 details:
+
+| Field | Value |
+|---|---|
+| Parent revision | `f40d06e` (freeze revision) |
+| Editorial revision | The revision that adds this entry (`docs: clarify approved evaluation rubric status`) |
+| Rubric SHA-256 at freeze revision `f40d06e` (historical, unchanged) | `af003d57b7061edf6878cc219a9572ad357100c07524c9e30ed763f45487e669` |
+| Rubric SHA-256 at approval revision `7173a28` (historical, unchanged) | `154cb764e52b046d6211d3daa386bfbecc78870e965485b9dad97503a5df8edd` |
+| Rubric SHA-256 after this editorial revision | `aa9cf168456ca1c681c06fe1eb2c023f74ed7feca4d5c1237f5cea3baa8cffa2` |
+| Dataset SHA-256 (unchanged) | `4a71f3e7268d15d268b61c10a8993c91e0c5e0d8ff2db60c82c19c411174392f` |
+| Checksum basis | LF-normalized bytes Git stores, as in the freeze record |
+| What changed | Header status line and history note; v0.1 stage-status lines in section 7 annotated with current status; section 8 heading and a current-status note; 8.2 anchor approval status; 8.5 case 002 decision and Day 13 gate outcome; 8.6 note on the accepted 003 span. Each pre-approval statement is kept and labeled *Historical*. |
+| Deliberately unchanged | Section 3's v0.1 urgency rule ("operational thresholds have **not yet** been established …"). It is a reference-label rule, and it remains accurate because the approved anchors are synthetic-only, not operational policy. |
+| Approval | The editorial change was requested in the Day 14 instructions. It does not change scoring meaning, so no new owner scoring approval is required. Rubric version stays v0.2. |
+
+A run that reports against eval-v1 should cite the dataset checksum and the
+rubric revision it used. Both rubric revisions carry identical scoring semantics.

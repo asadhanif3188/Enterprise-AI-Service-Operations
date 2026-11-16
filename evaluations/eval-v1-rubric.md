@@ -1,9 +1,13 @@
 # AI Triage Evaluation — Rubric v0.2
 
 **Project:** Enterprise AI Service Operations & Intelligence Platform  
-**Status:** APPROVED without amendment by the architecture owner (`AO-001`) on 2026-11-16, Asia/Karachi. 20 FINAL references; no evaluation results
+**Status:** APPROVED without amendment by the architecture owner (`AO-001`) on 2026-11-16, Asia/Karachi. 20 FINAL references; dataset frozen; original Day 13 gate PASS; no evaluation results
 
-**Target dataset:** [`eval-v1.jsonl`](eval-v1.jsonl) (frozen 2026-11-16; see the manifest freeze record)
+**Target dataset:** [`eval-v1.jsonl`](eval-v1.jsonl) (frozen 2026-11-16; see the manifest [freeze record](eval-v1-manifest.md#freeze-record))
+
+**Post-freeze editorial revision (2026-11-16):** status wording only; no scoring
+rule, denominator, output schema, prompt version or dataset change. See the
+manifest [post-freeze change history](eval-v1-manifest.md#post-freeze-change-history).
 
 **Evaluation task:** Initial service-case triage, not case resolution or authorization  
 **Current prompt and output contract:** `triage-v1`; `src/model_adapter.py` (`TriageSuggestion`)  
@@ -15,11 +19,13 @@ current operational review specification where it refines that design. Day 13B
 (2026-11-16) added clarifications in 8.5–8.6 after an AI-assisted consolidated
 review. On 2026-11-16 (Day 13C) the architecture owner approved v0.2, including
 sections 8.5–8.6 and the urgency anchors, without amendment, and decided 002 as
-medium. Section 8 keeps the wording as reviewed. Where it calls the text a
-proposal, unapproved or pending owner approval, that describes the state before
-approval. See the [manifest](eval-v1-manifest.md) approval ledger for current
-counts and review status, and the
-[reference review record](eval-v1-reference-review.md).
+medium. Section 8 keeps the wording as reviewed, with status-dependent passages
+marked as *Historical* and followed by the *Approved* outcome. Any remaining
+wording that calls the text a proposal, unapproved or pending owner approval
+describes the state before approval, not the current status. See the manifest
+[approval ledger](eval-v1-manifest.md#approval-ledger) and
+[freeze record](eval-v1-manifest.md#freeze-record) for current counts and review
+status, and the [reference review record](eval-v1-reference-review.md).
 
 ## 1. Purpose and scope
 
@@ -118,7 +124,7 @@ The evaluation work is divided into three stages, each producing a distinct arti
 Define the evaluation dimensions, scoring criteria, annotation rules, and unresolved questions.
 
 - Artifact: `evaluations/eval-v1-rubric.md`
-- Status: Preliminary design
+- Status (historical, v0.1): Preliminary design. *Current:* v0.2 approved by AO-001 on 2026-11-16.
 - Evidence boundary: No reference-labeled evaluation dataset or measured model accuracy is established by this rubric.
 
 **Stage 2 — Versioned evaluation dataset**
@@ -126,7 +132,7 @@ Define the evaluation dimensions, scoring criteria, annotation rules, and unreso
 Create at least 10 fully synthetic service cases, with human-reviewed reference annotations covering classification, urgency, insufficient information, and supporting evidence where applicable.
 
 - Artifact: `evaluations/eval-v1.jsonl`
-- Status: Planned
+- Status (historical, v0.1): Planned. *Current:* 20 synthetic cases, all FINAL, frozen 2026-11-16.
 - Evidence boundary: Reference labels represent evaluation expectations, not observed model performance.
 
 **Stage 3 — Model evaluation and analysis**
@@ -147,7 +153,12 @@ Execute the versioned dataset against a recorded model and prompt configuration.
 
 The existing single-model experiment establishes an initial integration baseline, not the results of the versioned evaluation dataset.
 
-## 8. Day 13A operational proposal (v0.2; approval pending)
+## 8. Operational specification v0.2 (Day 13A proposal; approved 2026-11-16)
+
+> **Current status.** Approved without amendment by AO-001 on 2026-11-16
+> (approval record 1, decision 5). The heading of this section read "Day 13A
+> operational proposal (v0.2; approval pending)" until that approval. Passages
+> labeled *Historical* below preserve the pre-approval wording.
 
 ### 8.1 Input and reference contract
 
@@ -191,13 +202,16 @@ The JSONL shape in section 2 is retained with these authored-data constraints:
   `high_urgency_claim` denotes asserted/injected urgency without sufficient
   impact evidence; it does not mean a high reference label.
 
-### 8.2 Proposed synthetic-only urgency anchors
+### 8.2 Synthetic-only urgency anchors (approved)
 
-These anchors are **unapproved annotation proposals**, not production severity
-policy, SLAs, response-time commitments or industry-standard thresholds. Numeric
-delays and headcounts below are case evidence, not universal cutoffs.
+*Historical (Day 13A–13B):* these anchors were proposed as **unapproved
+annotation proposals**. *Approved:* AO-001 approved them without amendment on
+2026-11-16 as part of rubric v0.2 (approval record 1, decision 5). They remain
+synthetic-only annotation anchors, not production severity policy, SLAs,
+response-time commitments or industry-standard thresholds. Numeric delays and
+headcounts below are case evidence, not universal cutoffs.
 
-| Reference | Proposed anchor | Dataset example and boundary |
+| Reference | Anchor (as proposed and approved) | Dataset example and boundary |
 |---|---|---|
 | high | Explicitly severe or broadly disruptive business impact | 001 stops all dispatch with no alternative; 017 supports high despite an unknown category. Many affected people alone is insufficient. |
 | medium | Meaningful documented disruption with limited scope or mitigating circumstances | 008 delays reconciliation 90 minutes but allows completion today. A workaround does not automatically make the impact low. |
@@ -284,13 +298,17 @@ the frozen approved cohort only.
 
 ### 8.5 Borderlines, disagreement and approval
 
-- **002 medium versus low:** six people and a 25-minute class delay support the
-  proposed medium anchor; the available room is mitigating. The owner must
-  decide whether this is meaningful disruption. Do not turn 25 minutes into an
-  automatic policy cutoff or choose the label to balance counts. Customer work
-  continued, so low remains a defensible competing interpretation. The Day 13B
-  AI-assisted consolidated review recommends medium; that is not an owner
-  decision, and 002 needs explicit owner approval before FINAL.
+- **002 medium versus low (decided: medium):** six people and a 25-minute class
+  delay support the medium anchor; the available room is mitigating. Do not turn
+  25 minutes into an automatic policy cutoff or choose the label to balance
+  counts. Customer work continued, so low remains a defensible competing
+  interpretation. *Historical (Day 13A–13B):* the owner still had to decide
+  whether this was meaningful disruption; the Day 13B AI-assisted consolidated
+  review recommended medium, which was not an owner decision, and 002 needed
+  explicit owner approval before FINAL. *Approved:* AO-001 decided **medium** on
+  2026-11-16 (approval record 1, decision 2): a scheduled six-person class had a
+  meaningful 25-minute interruption despite an alternative room being available.
+  No universal time threshold is established. 002 remains a borderline case.
 - **011 other versus application:** visible paper obstruction supports other;
   working controls do not prove every software component is healthy. Classify
   the reported physical issue, not an invented driver problem.
@@ -313,11 +331,19 @@ manifest review ledger (private identity mapping may remain local).
 
 At least ten actually reviewed FINAL rows are necessary for the Day 13 reference
 count gate. Passing structural tests or editing a status string is not approval.
-The original Day 13 gate remains PARTIAL until the required reviews and rubric
-approval are evidenced. Freezing the full 20-row dataset additionally requires
-approval of all included rows and explicit owner freeze authorization; alternatively
-an explicitly versioned approved subset must be reviewed and its coverage recorded.
-Do not silently drop pending rows or call the current dataset frozen.
+Freezing the full 20-row dataset additionally requires approval of all included
+rows and explicit owner freeze authorization; alternatively an explicitly
+versioned approved subset must be reviewed and its coverage recorded. Do not
+silently drop pending rows.
+
+*Historical (Day 13A–13B):* the original Day 13 gate remained PARTIAL until the
+required reviews and rubric approval were evidenced, and the dataset was not to
+be called frozen. *Approved:* AO-001 approved all 20 references and this rubric
+on 2026-11-16; all 20 are FINAL, the original Day 13 gate is **PASS**, and the
+full 20-row dataset was frozen the same day under explicit owner authorization
+(approval record 1, decisions 7–8). See the manifest
+[approval ledger](eval-v1-manifest.md#approval-ledger) and
+[freeze record](eval-v1-manifest.md#freeze-record).
 
 ### 8.6 AI-assisted review provenance (Day 13B clarification)
 
@@ -329,4 +355,6 @@ document that calls itself an owner or adjudicator approval is evidence only whe
 an actual, identifiable architecture owner has recorded that decision in the
 manifest's approval ledger. AI-recommended span refinements are draft changes,
 and the owner must approve the refined row. The reconciliation is recorded in
-[`eval-v1-reference-review.md`](eval-v1-reference-review.md).
+[`eval-v1-reference-review.md`](eval-v1-reference-review.md). *Approved:* AO-001
+accepted the Day 13B span refinement to 003 on 2026-11-16 (approval record 1,
+decision 4); the AI-assisted reviews remain advisory inputs, not approval records.
